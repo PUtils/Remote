@@ -1,81 +1,135 @@
-.TH rt 1 "September 2024" "rt 1.0" "Remote Terminal Control"
-.SH NAME
-rt \- Remote terminal client for accessing your computer via SSH and web interfaces
-
-.SH SYNOPSIS
-.B rt
-.RB [\-l
-.RB [\fIDIRECTORY\fR]]
-.RB [\-h]
-.RB [\-s
-.IR SOCKET ]
-.RB [\-p
-.IR PASSWORD ]
-.RB [\-\-help]
-
-.SH DESCRIPTION
-.B rt
-is a secure remote terminal client that connects to a
-.B rtd
-daemon running on your machine. It provides multiple connection methods:
-.IP \(bu 2
-Interactive SSH terminal access through a Cloudflare tunnel
-.IP \(bu 2
-Browser-based web terminal for monitoring and hibernation control
-.IP \(bu 2
-Sandboxed directory access for running Claude Code on other machines
-
-.SH OPTIONS
-.TP
-.B \-l \fR[\fIDIRECTORY\fR]
-Start an interactive remote shell session. If
-.I DIRECTORY
-is provided, the session is restricted to that directory (sandbox mode).
-If no directory is given, the current working directory is used.
-.TP
-.B \-h
-Access the hibernation control panel via web interface. When in hibernation mode,
-the remote will refuse all new requests and close existing sessions.
-.TP
-.B \-s \fISOCKET\fR
-Specify the Unix socket path for daemon communication
-.RB (default:
-.IR /tmp/rt.sock ).
-.TP
-.B \-p \fIPASSWORD\fR
-Provide the authentication password. Required for all connections.
-.TP
-.B \-\-help
-Display help message and exit.
-
-.SH USAGE EXAMPLES
-.TP
-Start a remote shell in the current directory:
-.B rt \-l \-p mypassword
-
-.TP
-Start a remote shell in a specific directory (sandbox mode):
-.B rt \-l /path/to/project \-p mypassword
-
-.TP
-Access hibernation control panel:
-.B rt \-h \-p mypassword
-
-.SH SECURITY NOTES
-.IP \(bu 2
-Always set a strong password with
-.B rtd
-.IP \(bu 2
-Failed authentication attempts trigger exponential backoff and temporary lockout
-.IP \(bu 2
-All traffic should be protected by SSH or Cloudflare tunnel encryption
-.IP \(bu 2
-Sandbox mode restricts filesystem access to the specified directory only
-
-.SH SEE ALSO
-.BR rtd (1),
-.BR ssh (1),
-.BR chroot (2)
-
-.SH AUTHOR
-Implemented as part of the PUtils remote access suite.
+.Dd September 24, 2026
+.Dt RT 1
+.Os
+.Sh NAME
+.Nm rt
+.Nd reach this Mac's terminal remotely over SSH
+.Sh SYNOPSIS
+.Nm
+.Op Fl l Op Ar dir
+.Op Fl h
+.Op Fl k Ar keyfile
+.Op Fl n
+.Sh DESCRIPTION
+.Nm
+runs a password-protected SSH server for the current user and publishes it
+through a Cloudflare quick tunnel, so the Mac can be used like a VPS from
+anywhere.
+It asks for a password when it starts; the password is kept only as a
+slow PBKDF2 hash in memory and is gone when
+.Nm
+exits.
+.Pp
+Interactive shells
+.Pq Li ssh host ,
+single commands
+.Pq Li ssh host 'cmd' ,
+and SSH connection sharing
+.Pq Cm ControlMaster
+all work, so an agent can reuse a connection you logged into once without
+knowing the password.
+Port forwarding, agent forwarding and X11 forwarding are not supported.
+.Pp
+The options are:
+.Bl -tag -width Ds
+.It Fl l Op Ar dir
+Sandbox every session to
+.Ar dir ,
+or the current directory if none is given.
+Sessions can read and write
+.Ar dir ,
+can run the Mac's installed tools, and cannot read the rest of the home
+directory or write anywhere else except temporary directories.
+They get a separate home directory,
+.Pa ~/.local/state/rt/home ,
+and cannot use the login keychain, open applications or send Apple Events.
+.It Fl h
+Also publish a phone panel.
+After logging in with the same password it can hibernate and wake
+.Nm ,
+change the directory new sessions start in, and close sessions.
+While hibernating, every open session is closed and new connections are
+refused.
+.It Fl k Ar keyfile
+Also require one of the public keys in
+.Ar keyfile
+(one key per line, in
+.Pa authorized_keys
+format without options).
+The key is checked first, then the password.
+.It Fl n
+Do not start a tunnel; listen on 127.0.0.1 only.
+.El
+.Pp
+Without
+.Fl l ,
+sessions have the user's full access and start in the current directory.
+.Sh CONNECTING
+.Nm
+prints the tunnel host name when it is ready.
+The client needs
+.Xr cloudflared 1 :
+.Bd -literal -offset indent
+ssh -o ProxyCommand='cloudflared access ssh --hostname %h' HOST
+.Ed
+.Pp
+It also prints an
+.Pa ~/.ssh/config
+entry with connection sharing enabled.
+Quick tunnel host names change every time
+.Nm
+starts.
+.Pp
+To give Claude Code a token inside a session, send it from the client:
+.Bd -literal -offset indent
+ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN HOST
+.Ed
+.Pp
+Only
+.Ev LANG ,
+.Ev LC_* ,
+.Ev COLORTERM ,
+.Ev CLAUDE_CODE_OAUTH_TOKEN
+and
+.Ev ANTHROPIC_API_KEY
+are accepted from the client.
+.Sh SECURITY
+Each connection runs in its own process, started fresh with
+.Xr execv 2
+so it never holds the password hash.
+A separate supervisor process checks passwords, keeps the hibernation state
+and the panel, and can kill any session.
+.Pp
+After three wrong passwords in a row, from SSH or the panel together, each
+further attempt must wait 1, 2, 4 ... up to 60 seconds; after ten,
+.Nm
+refuses all logins for 15 minutes.
+Every login and wrong password is logged to the terminal running
+.Nm .
+.Pp
+The panel's login cookie is HttpOnly, Secure and SameSite=Strict, and every
+API request must carry a custom header, so other sites cannot act on it.
+.Sh SLEEP
+.Nm
+runs
+.Xr caffeinate 8
+so the Mac stays awake while it runs, including with the screen locked.
+With the lid closed macOS still sleeps unless
+.Li sudo pmset -a disablesleep 1
+has been run
+.Pq Li 0 No undoes it ;
+.Nm
+says so at startup.
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/.local/state/rt/host_ed25519
+SSH host key, created on first run.
+Its fingerprint is printed at startup; compare it the first time you connect.
+.It Pa ~/.local/state/rt/home
+Home directory for sandboxed sessions.
+.El
+.Sh SEE ALSO
+.Xr cloudflared 1 ,
+.Xr ssh 1 ,
+.Xr ssh_config 5 ,
+.Xr caffeinate 8

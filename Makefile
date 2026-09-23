@@ -1,38 +1,38 @@
-CC = clang
-CFLAGS = -Wall -Wextra -O2 -std=c99 -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -lpthread
+PREFIX ?= $(shell brew --prefix 2>/dev/null || echo /usr/local)
 
-SRC_DIR = src
-BUILD_DIR = build
-BIN_DIR = bin
+CC ?= clang
+CFLAGS ?= -O2
+CFLAGS += -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+          $(shell pkg-config --cflags libssh) -Ibuild
+LDLIBS += $(shell pkg-config --libs libssh)
 
-SOURCES = $(wildcard $(SRC_DIR)/*.c)
-OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SOURCES))
-DAEMON = $(BIN_DIR)/rtd
-CLI = $(BIN_DIR)/rt
+SRC := src/main.c src/supervisor.c src/conn.c src/auth.c src/sandbox.c
+OBJ := $(SRC:src/%.c=build/%.o)
+WEB := web/panel.html web/panel.css web/panel.js
 
-all: $(DAEMON) $(CLI)
+bin/rt: $(OBJ) | bin
+	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+build/%.o: src/%.c src/rt.h | build
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+build/supervisor.o: build/web.h
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+build/web.h: $(WEB) | build
+	cd web && for f in panel.html panel.css panel.js; do xxd -i $$f; done > ../$@
 
-$(DAEMON): $(BUILD_DIR)/rtd.o $(BUILD_DIR)/auth.o $(BUILD_DIR)/session.o $(BUILD_DIR)/sandbox.o | $(BIN_DIR)
-	$(CC) $^ -o $@ $(LDFLAGS)
+bin build:
+	mkdir -p $@
 
-$(CLI): $(BUILD_DIR)/rt.o | $(BIN_DIR)
-	$(CC) $^ -o $@
+install: bin/rt
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/man/man1
+	install -m 755 bin/rt $(DESTDIR)$(PREFIX)/bin/rt
+	install -m 644 man/rt.1 $(DESTDIR)$(PREFIX)/share/man/man1/rt.1
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/rt $(DESTDIR)$(PREFIX)/share/man/man1/rt.1
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN_DIR)
+	rm -rf bin build
 
-install: all
-	install -m 755 $(DAEMON) /usr/local/bin/
-	install -m 755 $(CLI) /usr/local/bin/
-
-.PHONY: all clean install
+.PHONY: install uninstall clean

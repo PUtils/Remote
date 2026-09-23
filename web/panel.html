@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>rt panel</title>
+<link rel="stylesheet" href="/panel.css">
+<script src="/panel.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>rt</h1>
+  <span id="status" class="pill" hidden></span>
+</header>
+
+<main>
+  <form id="login" class="card" hidden>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" autofocus required>
+    <button type="submit" class="primary">Log in</button>
+    <p class="error" role="alert"></p>
+  </form>
+
+  <div id="panel" hidden>
+    <section class="card">
+      <p id="state-text" class="lead"></p>
+      <button id="toggle" type="button" class="big"></button>
+      <p class="error" role="alert"></p>
+    </section>
+
+    <form id="cd" class="card">
+      <label for="dir">Directory</label>
+      <p id="dir-note" class="note"></p>
+      <input id="dir" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <button type="submit">Change directory</button>
+      <p class="error" role="alert"></p>
+    </form>
+
+    <section class="card">
+      <h2>Sessions</h2>
+      <ul id="sessions"></ul>
+      <p id="no-sessions" class="note">No open sessions.</p>
+    </section>
+
+    <button id="logout" type="button" class="link">Log out</button>
+  </div>
+</main>
+</body>
+</html>

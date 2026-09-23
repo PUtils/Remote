@@ -1,83 +1,65 @@
-#include "sandbox.h"
+#include "rt.h"
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <limits.h>
-#include <libgen.h>
 
-extern int chroot(const char *path);
-extern int chdir(const char *path);
+/*
+ * Seatbelt rules; the last matching rule wins. Everything is readable except
+ * the real home directory; nothing is writable except the working directory,
+ * the sandbox home, temp dirs and /dev. Tool directories found on PATH inside
+ * home are re-allowed for reading so installed tools keep working.
+ */
+static const char head[] =
+    "(version 1)\n"
+    "(allow default)\n"
+    "(deny file-read-data file-read-xattr file-write* (subpath (param \"HOME\")))\n"
+    "(deny file-write*)\n"
+    "(allow file-write* (subpath \"/dev\") (subpath \"/private/tmp\")"
+    " (subpath \"/private/var/folders\"))\n";
 
-Sandbox* sandbox_init(const char *root_path) {
-    Sandbox *sandbox = malloc(sizeof(Sandbox));
-    if (!sandbox) return NULL;
+static const char tail[] =
+    "(allow file-read-data file-read-xattr file-write* (subpath (param \"DIR\")))\n"
+    "(deny file-read-data file-read-xattr file-write* (subpath (param \"STATE\")))\n"
+    "(allow file-read-data file-read-xattr file-write* (subpath (param \"SBHOME\")))\n"
+    "(deny mach-lookup (global-name \"com.apple.SecurityServer\")"
+    " (global-name \"com.apple.securityd.xpc\"))\n"
+    /* Each of these would run code outside the sandbox. */
+    "(deny job-creation lsopen appleevent-send)\n";
 
-    char *resolved = realpath(root_path, NULL);
-    if (!resolved) {
-        free(sandbox);
-        return NULL;
-    }
-
-    struct stat sb;
-    if (stat(resolved, &sb) != 0 || !S_ISDIR(sb.st_mode)) {
-        free(resolved);
-        free(sandbox);
-        return NULL;
-    }
-
-    sandbox->root_path = malloc(PATH_MAX);
-    if (!sandbox->root_path) {
-        free(resolved);
-        free(sandbox);
-        return NULL;
-    }
-
-    strncpy(sandbox->root_path, resolved, PATH_MAX - 1);
-    sandbox->root_path[PATH_MAX - 1] = '\0';
-
-    free(resolved);
-    sandbox->enabled = 1;
-    return sandbox;
-}
-
-int sandbox_is_path_allowed(Sandbox *sandbox, const char *path) {
-    if (!sandbox->enabled) return 1;
-
-    char *resolved = realpath(path, NULL);
-    if (!resolved) {
+int sandbox_tools(const char *home, char tools[][PATH_MAX], int max)
+{
+    const char *path = getenv("PATH");
+    size_t hl = strlen(home);
+    int n = 0;
+    if (!path)
         return 0;
+    char *copy = strdup(path), *save = NULL;
+    for (char *d = strtok_r(copy, ":", &save); d && n < max; d = strtok_r(NULL, ":", &save)) {
+        char real[PATH_MAX];
+        if (!realpath(d, real) || strncmp(real, home, hl) != 0 || real[hl] != '/')
+            continue;
+        /* Allow the directory above bin/ so a tool's own lib/ and share/ resolve. */
+        char *slash = strrchr(real, '/');
+        if (slash && (size_t)(slash - real) > hl)
+            *slash = '\0';
+        int dup = 0;
+        for (int i = 0; i < n; i++)
+            dup |= strcmp(tools[i], real) == 0;
+        if (!dup)
+            strlcpy(tools[n++], real, PATH_MAX);
     }
-
-    int allowed = 0;
-    size_t root_len = strlen(sandbox->root_path);
-    if (strncmp(resolved, sandbox->root_path, root_len) == 0) {
-        if (resolved[root_len] == '\0' || resolved[root_len] == '/') {
-            allowed = 1;
-        }
-    }
-
-    free(resolved);
-    return allowed;
+    free(copy);
+    return n;
 }
 
-int sandbox_enter(Sandbox *sandbox, pid_t pid __attribute__((unused))) {
-    if (!sandbox->enabled) return 0;
-
-    if (chroot(sandbox->root_path) != 0) {
-        return -1;
-    }
-
-    if (chdir("/") != 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-void sandbox_free(Sandbox *sandbox) {
-    if (sandbox) {
-        free(sandbox->root_path);
-        free(sandbox);
-    }
+int sandbox_profile(char *out, size_t cap, int ntools)
+{
+    size_t len = strlcpy(out, head, cap);
+    for (int i = 0; i < ntools && len < cap; i++)
+        len += snprintf(out + len, cap - len,
+                        "(allow file-read-data file-read-xattr (subpath (param \"T%d\")))\n", i);
+    if (len < cap)
+        len += strlcpy(out + len, tail, cap - len);
+    return len < cap ? 0 : -1;
 }
