@@ -25,7 +25,7 @@ static void usage(FILE *f)
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
-            "  -n         no Cloudflare tunnel; listen on localhost only\n"
+            "  -n         no relay or Cloudflare tunnel; listen on localhost only\n"
             "See man rt.\n");
 }
 
@@ -87,6 +87,32 @@ static int host_key(const char *path, char *fp, size_t cap)
     }
     ssh_key_free(key);
     return ok ? 0 : -1;
+}
+
+/* A random name, kept across runs so the join command stays the same. */
+static int relay_name(const char *state, char *out, size_t cap)
+{
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/relay_name", state);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        int ok = fgets(out, (int)cap, f) != NULL;
+        fclose(f);
+        out[strcspn(out, "\r\n")] = '\0';
+        if (ok && strncmp(out, "rt-", 3) == 0 && strlen(out) == 19)
+            return 0;
+    }
+    unsigned char r[8];
+    arc4random_buf(r, sizeof r);
+    snprintf(out, cap, "rt-");
+    for (int i = 0; i < 8; i++)
+        snprintf(out + 3 + 2 * i, cap - 3 - 2 * i, "%02x", r[i]);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return -1;
+    dprintf(fd, "%s\n", out);
+    close(fd);
+    return 0;
 }
 
 static int read_password(struct pwhash *h)
@@ -201,8 +227,9 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-    if (cfg.tunnel && system("command -v cloudflared >/dev/null 2>&1") != 0) {
-        fprintf(stderr, "rt: cloudflared not found (brew install cloudflared), or use -n\n");
+    cfg.cloudflared = cfg.tunnel && system("command -v cloudflared >/dev/null 2>&1") == 0;
+    if (cfg.panel && cfg.tunnel && !cfg.cloudflared) {
+        fprintf(stderr, "rt: the phone panel needs cloudflared (brew install cloudflared)\n");
         return 1;
     }
 
@@ -217,8 +244,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    char fp[128];
-    if (host_key(cfg.hostkey, fp, sizeof fp) != 0) {
+    snprintf(cfg.relay_kh, sizeof cfg.relay_kh, "%s/relay_known_hosts", cfg.state);
+    if (relay_name(cfg.state, cfg.relay, sizeof cfg.relay) != 0) {
+        fprintf(stderr, "rt: cannot create the relay name in %s\n", cfg.state);
+        return 1;
+    }
+
+    char *fp = cfg.fingerprint;
+    if (host_key(cfg.hostkey, fp, sizeof cfg.fingerprint) != 0) {
         fprintf(stderr, "rt: cannot load or create host key %s\n", cfg.hostkey);
         return 1;
     }

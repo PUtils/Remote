@@ -14,6 +14,10 @@ struct config {
     int sandbox;
     int panel;
     int tunnel;
+    int cloudflared;
+    char relay[32];
+    char relay_kh[PATH_MAX];
+    char fingerprint[128];
     char keys[PATH_MAX];
     char state[PATH_MAX];
     char hostkey[PATH_MAX];

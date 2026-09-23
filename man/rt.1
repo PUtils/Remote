@@ -12,9 +12,9 @@
 .Op Fl n
 .Sh DESCRIPTION
 .Nm
-runs a password-protected SSH server for the current user and publishes it
-through a Cloudflare quick tunnel, so the Mac can be used like a VPS from
-anywhere.
+runs a password-protected SSH server for the current user and makes it
+reachable from anywhere through the public SSH relay ssh-j.com and a
+Cloudflare quick tunnel, so the Mac can be used like a VPS.
 It asks for a password when it starts; the password is kept only as a
 slow PBKDF2 hash in memory and is gone when
 .Nm
@@ -58,37 +58,56 @@ Also require one of the public keys in
 format without options).
 The key is checked first, then the password.
 .It Fl n
-Do not start a tunnel; listen on 127.0.0.1 only.
+Do not connect to the relay or start a tunnel; listen on 127.0.0.1 only.
 .El
 .Pp
 Without
 .Fl l ,
 sessions have the user's full access and start in the current directory.
 .Sh CONNECTING
-When the tunnel starts,
 .Nm
-waits until its name resolves in public DNS and an SSH handshake succeeds
-through it, then prints the command to join.
-Using a quick tunnel's name too early makes the client cache a failed
-lookup.
-The client needs
-.Xr cloudflared 1 :
+checks each route end to end before it prints the command for it.
+.Pp
+The relay route needs nothing but
+.Xr ssh 1
+on the other computer:
+.Bd -literal -offset indent
+ssh -J NAME@ssh-j.com NAME
+.Ed
+.Pp
+.Ar NAME
+is random, created on the first run and kept, so the command stays the same.
+The Mac keeps an outgoing SSH connection to ssh-j.com open and reconnects if
+it drops.
+The relay only forwards the session, which stays encrypted between the two
+computers; the first connection asks to trust ssh-j.com's key and this Mac's,
+whose fingerprint
+.Nm
+prints.
+ssh-j.com listens on port 22 only.
+.Pp
+If a network blocks port 22, the Cloudflare route goes over HTTPS but needs
+.Xr cloudflared 1
+on the other computer:
 .Bd -literal -offset indent
 ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" HOST
 .Ed
 .Pp
-The same command is shown in the phone panel, with a copy button.
-.Pp
-It also prints an
-.Pa ~/.ssh/config
-entry with connection sharing enabled.
 Quick tunnel host names change every time
 .Nm
 starts.
+Without cloudflared on the Mac only the relay runs, and
+.Fl h
+is unavailable.
+Both commands are shown in the phone panel with a copy button, and
+.Nm
+prints an
+.Pa ~/.ssh/config
+entry with connection sharing for the relay route.
 .Pp
 To give Claude Code a token inside a session, send it from the client:
 .Bd -literal -offset indent
-ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN HOST
+ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN ...
 .Ed
 .Pp
 Only
@@ -133,6 +152,8 @@ SSH host key, created on first run.
 Its fingerprint is printed at startup; compare it the first time you connect.
 .It Pa ~/.local/state/rt/home
 Home directory for sandboxed sessions.
+.It Pa ~/.local/state/rt/relay_name
+The relay name; delete it to get a new join command.
 .El
 .Sh SEE ALSO
 .Xr cloudflared 1 ,

@@ -47,8 +47,10 @@ struct token {
     time_t exp;
 };
 
+enum tunnel_kind { T_RELAY, T_CF_SSH, T_PANEL };
+
 struct tunnel {
-    const char *what;
+    enum tunnel_kind kind;
     char url_arg[64];
     pid_t pid, probe;
     int fd;
@@ -63,9 +65,11 @@ static struct pwhash *pw;
 static struct conn conns[RT_MAX_CONNS];
 static struct web webs[MAX_WEB];
 static struct token tokens[MAX_TOKENS];
-static struct tunnel tunnels[2];
+static struct tunnel tunnels[3];
 static int ntunnels;
-static char join_cmd[512];
+static char join_plain[256], join_cf[256];
+
+static void probe_start(struct tunnel *t);
 static int hib, fails;
 static time_t next_try, locked_until;
 static int sigp[2];
@@ -259,6 +263,25 @@ static void hibernate(int on, const char *via)
 
 /* ---- tunnels ---- */
 
+#define RELAY_HOST "ssh-j.com"
+
+static void relay_opts(char **a, int *n, char *kh)
+{
+    static char khopt[PATH_MAX + 32];
+    snprintf(khopt, sizeof khopt, "UserKnownHostsFile=%s", kh);
+    const char *opts[] = {"BatchMode=yes", "ExitOnForwardFailure=yes", "ServerAliveInterval=30",
+                          "ServerAliveCountMax=3", "ConnectTimeout=20",
+                          "StrictHostKeyChecking=accept-new", khopt, "IdentityAgent=none",
+                          "PubkeyAuthentication=no", "LogLevel=ERROR", NULL};
+    a[(*n)++] = "/usr/bin/ssh";
+    a[(*n)++] = "-F";
+    a[(*n)++] = "/dev/null";
+    for (int i = 0; opts[i]; i++) {
+        a[(*n)++] = "-o";
+        a[(*n)++] = (char *)opts[i];
+    }
+}
+
 static void tunnel_start(struct tunnel *t)
 {
     int p[2];
@@ -272,8 +295,22 @@ static void tunnel_start(struct tunnel *t)
         dup2(p[1], 2);
         int null = open("/dev/null", O_RDONLY);
         dup2(null, 0);
-        execlp("cloudflared", "cloudflared", "tunnel", "--no-autoupdate", "--url",
-               t->url_arg, (char *)NULL);
+        if (t->kind == T_RELAY) {
+            char *a[40], fwd[128], dest[128];
+            int n = 0;
+            relay_opts(a, &n, cfg->relay_kh);
+            snprintf(fwd, sizeof fwd, "%s:22:%s", cfg->relay, t->url_arg);
+            snprintf(dest, sizeof dest, "%s@" RELAY_HOST, cfg->relay);
+            a[n++] = "-N";
+            a[n++] = "-R";
+            a[n++] = fwd;
+            a[n++] = dest;
+            a[n] = NULL;
+            execv(a[0], a);
+        } else {
+            execlp("cloudflared", "cloudflared", "tunnel", "--no-autoupdate", "--url",
+                   t->url_arg, (char *)NULL);
+        }
         _exit(127);
     }
     close(p[1]);
@@ -286,6 +323,11 @@ static void tunnel_start(struct tunnel *t)
     t->fd = p[0];
     t->len = 0;
     t->url[0] = '\0';
+    if (t->kind == T_RELAY) {
+        /* The relay address is fixed, so there is nothing to wait for in the output. */
+        snprintf(t->url, sizeof t->url, "%s", cfg->relay);
+        probe_start(t);
+    }
 }
 
 /* Runs argv and reports whether its output contains want within secs. */
@@ -340,26 +382,46 @@ static int run_expect(char *const argv[], const char *want, int secs)
 }
 
 /*
- * A quick tunnel's name reaches public DNS a few seconds after cloudflared
- * prints it, and a client that looks it up too early caches the miss. So the
- * address is only announced once it resolves and answers end to end.
+ * Checks a tunnel end to end before its address is shown. A quick tunnel's
+ * name also reaches public DNS a few seconds after cloudflared prints it, and
+ * a client that looks it up too early caches the miss.
  */
 static int probe(const struct tunnel *t)
 {
-    char *host = (char *)t->url + strlen("https://");
-    char *dig[] = {"dig", "+short", "+time=2", "+tries=1", host, "@1.1.1.1", "A", NULL};
-    int resolved = 0;
-    for (int i = 0; i < 45 && !resolved; i++)
-        if (!(resolved = run_expect(dig, ".", 5)))
-            sleep(2);
-    if (!resolved)
-        return 2;
-    char *ssh[] = {"cloudflared", "access", "ssh", "--hostname", host, NULL};
-    char *web[] = {"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10",
-                   (char *)t->url, NULL};
-    int is_ssh = strcmp(t->what, "ssh") == 0;
+    char *check[40];
+    const char *want = "SSH-2.0";
+    if (t->kind == T_RELAY) {
+        static char target[128], dest[128];
+        int n = 0;
+        relay_opts(check, &n, cfg->relay_kh);
+        snprintf(target, sizeof target, "%s:22", cfg->relay);
+        snprintf(dest, sizeof dest, "%s@" RELAY_HOST, cfg->relay);
+        check[n++] = "-W";
+        check[n++] = target;
+        check[n++] = dest;
+        check[n] = NULL;
+    } else {
+        char *host = (char *)t->url + strlen("https://");
+        char *dig[] = {"dig", "+short", "+time=2", "+tries=1", host, "@1.1.1.1", "A", NULL};
+        int resolved = 0;
+        for (int i = 0; i < 45 && !resolved; i++)
+            if (!(resolved = run_expect(dig, ".", 5)))
+                sleep(2);
+        if (!resolved)
+            return 2;
+        char *ssh[] = {"cloudflared", "access", "ssh", "--hostname", host, NULL};
+        char *web[] = {"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10",
+                       (char *)t->url, NULL};
+        char **src = t->kind == T_CF_SSH ? ssh : web;
+        int i = 0;
+        do
+            check[i] = src[i];
+        while (src[i++]);
+        if (t->kind == T_PANEL)
+            want = "200";
+    }
     for (int i = 0; i < 8; i++) {
-        if (run_expect(is_ssh ? ssh : web, is_ssh ? "SSH-2.0" : "200", 12))
+        if (run_expect(check, want, 12))
             return 0;
         sleep(3);
     }
@@ -380,27 +442,32 @@ static void probe_start(struct tunnel *t)
 
 static void announce(struct tunnel *t, int ok)
 {
-    const char *host = t->url + strlen("https://");
-    if (strcmp(t->what, "ssh") != 0) {
-        logmsg("%s phone panel: %s", ok ? "ready," : "not confirmed yet (may need a minute),", t->url);
+    const char *state = ok ? "ready" : "not confirmed yet (it may need a minute)";
+    if (t->kind == T_PANEL) {
+        logmsg("phone panel %s: %s", state, t->url);
         return;
     }
-    snprintf(join_cmd, sizeof join_cmd,
-             "ssh -o \"ProxyCommand=cloudflared access ssh --hostname %%h\" %s", host);
-    if (ok)
-        logmsg("ready. Join from another computer (it needs cloudflared):");
-    else
-        logmsg("tunnel not confirmed yet; this may need another minute:");
+    if (t->kind == T_CF_SSH) {
+        snprintf(join_cf, sizeof join_cf,
+                 "ssh -o \"ProxyCommand=cloudflared access ssh --hostname %%h\" %s",
+                 t->url + strlen("https://"));
+        logmsg("cloudflare route %s, for computers with cloudflared:\n\n    %s\n", state, join_cf);
+        return;
+    }
+    snprintf(join_plain, sizeof join_plain, "ssh -J %s@" RELAY_HOST " %s", cfg->relay, cfg->relay);
+    logmsg("%s. Join from any computer with plain ssh:", state);
     fprintf(stderr,
             "\n    %s\n\n"
+            "    The first time, ssh asks to trust two keys: " RELAY_HOST "'s (the public relay)\n"
+            "    and this Mac's, which must be %s\n\n"
             "    To let agents reuse one login, put this in ~/.ssh/config and run `ssh mac`:\n"
             "      Host mac\n"
             "        HostName %s\n"
-            "        ProxyCommand cloudflared access ssh --hostname %%h\n"
+            "        ProxyJump %s@" RELAY_HOST "\n"
             "        ControlMaster auto\n"
             "        ControlPath ~/.ssh/cm-%%C\n"
             "        ControlPersist 4h\n\n",
-            join_cmd, host);
+            join_plain, cfg->fingerprint, cfg->relay, cfg->relay);
 }
 
 static void tunnel_read(struct tunnel *t)
@@ -426,7 +493,6 @@ static void tunnel_read(struct tunnel *t)
         s -= 8;
         e += strlen(".trycloudflare.com");
         snprintf(t->url, sizeof t->url, "%.*s", (int)(e - s), s);
-        logmsg("%s tunnel created, checking that it answers...", t->what);
         probe_start(t);
         t->len = 0;
     } else if (t->len > sizeof t->buf / 2) {
@@ -509,7 +575,9 @@ static void state_json(char *out, size_t cap)
                                 hib ? "true" : "false", cfg->sandbox ? "true" : "false");
     n += json_str(out + n, cap - n, cfg->dir);
     n += (size_t)snprintf(out + n, cap - n, ",\"join\":");
-    n += join_cmd[0] ? json_str(out + n, cap - n, join_cmd) : (size_t)snprintf(out + n, cap - n, "null");
+    n += join_plain[0] ? json_str(out + n, cap - n, join_plain) : (size_t)snprintf(out + n, cap - n, "null");
+    n += (size_t)snprintf(out + n, cap - n, ",\"join_cf\":");
+    n += join_cf[0] ? json_str(out + n, cap - n, join_cf) : (size_t)snprintf(out + n, cap - n, "null");
     n += (size_t)snprintf(out + n, cap - n, ",\"sessions\":[");
     int first = 1;
     for (int i = 0; i < RT_MAX_CONNS && n < cap - 256; i++) {
@@ -819,14 +887,20 @@ static void reap(void)
             if (t->pid != p)
                 continue;
             t->pid = 0;
-            if (strcmp(t->what, "ssh") == 0)
-                join_cmd[0] = '\0';
+            if (t->kind == T_RELAY)
+                join_plain[0] = '\0';
+            else if (t->kind == T_CF_SSH)
+                join_cf[0] = '\0';
             if (t->probe > 0) {
                 killpg(t->probe, SIGKILL);
                 t->probe = 0;
             }
             if (!stopping) {
-                logmsg("%s tunnel stopped; restarting (the address will change)", t->what);
+                if (t->kind == T_RELAY)
+                    logmsg("relay connection dropped; reconnecting (same address)");
+                else
+                    logmsg("%s tunnel stopped; restarting (the address will change)",
+                           t->kind == T_PANEL ? "panel" : "cloudflare");
                 t->restart_at = time(NULL) + 5;
             }
         }
@@ -855,17 +929,22 @@ int supervise(struct config *c, struct pwhash *h, int ssh_fd, int ssh_port, int 
     sigaction(SIGHUP, &sa, NULL);
 
     if (cfg->tunnel) {
-        tunnels[ntunnels].what = "ssh";
-        snprintf(tunnels[ntunnels++].url_arg, 64, "tcp://127.0.0.1:%d", ssh_port);
-        if (http_fd >= 0) {
-            tunnels[ntunnels].what = "panel";
+        tunnels[ntunnels].kind = T_RELAY;
+        snprintf(tunnels[ntunnels++].url_arg, 64, "127.0.0.1:%d", ssh_port);
+        if (cfg->cloudflared) {
+            tunnels[ntunnels].kind = T_CF_SSH;
+            snprintf(tunnels[ntunnels++].url_arg, 64, "tcp://127.0.0.1:%d", ssh_port);
+        }
+        if (cfg->cloudflared && http_fd >= 0) {
+            tunnels[ntunnels].kind = T_PANEL;
             snprintf(tunnels[ntunnels++].url_arg, 64, "http://127.0.0.1:%d", http_port);
         }
+        logmsg("connecting to the relay%s, checking each route works...",
+               cfg->cloudflared ? " and cloudflare" : "");
         for (int i = 0; i < ntunnels; i++) {
             tunnels[i].fd = -1;
             tunnel_start(&tunnels[i]);
         }
-        logmsg("starting cloudflare tunnels...");
     }
 
     while (!stopping) {

@@ -53,8 +53,16 @@ function render(s) {
   toggle.classList.toggle("wake", s.hibernating);
   toggle.dataset.action = s.hibernating ? "wake" : "hibernate";
 
-  $("#join").hidden = !s.join;
-  if (s.join) $("#join-cmd").textContent = s.join;
+  const routes = [
+    [s.join, "Works with plain ssh."],
+    [s.join_cf, "Needs cloudflared on that computer; use it if port 22 is blocked."],
+  ].filter(([cmd]) => cmd);
+  $("#join").hidden = routes.length === 0;
+  const joinList = $("#join-list");
+  const shown = [...joinList.querySelectorAll(".join-cmd")].map((c) => c.textContent).join("\n");
+  if (shown !== routes.map(([cmd]) => cmd).join("\n")) {
+    joinList.replaceChildren(...routes.map(([cmd, note]) => joinItem(cmd, note)));
+  }
 
   const dir = $("#dir");
   if (document.activeElement !== dir) dir.value = s.dir;
@@ -139,17 +147,31 @@ $("#cd").addEventListener("submit", async (e) => {
   if (ok) $("#dir").blur();
 });
 
-$("#copy").addEventListener("click", async (e) => {
-  const btn = e.currentTarget;
-  try {
-    await navigator.clipboard.writeText($("#join-cmd").textContent);
-    btn.textContent = "Copied";
-  } catch {
-    getSelection().selectAllChildren($("#join-cmd"));
-    btn.textContent = "Selected; copy it from the menu";
-  }
-  setTimeout(() => { btn.textContent = "Copy command"; }, 2500);
-});
+function joinItem(cmd, note) {
+  const item = document.createElement("div");
+  item.className = "join-item";
+  const code = document.createElement("code");
+  code.className = "join-cmd";
+  code.textContent = cmd;
+  const p = document.createElement("p");
+  p.className = "note";
+  p.textContent = note;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Copy command";
+  btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      btn.textContent = "Copied";
+    } catch {
+      getSelection().selectAllChildren(code);
+      btn.textContent = "Selected; copy it from the menu";
+    }
+    setTimeout(() => { btn.textContent = "Copy command"; }, 2500);
+  });
+  item.append(code, p, btn);
+  return item;
+}
 
 $("#logout").addEventListener("click", async () => {
   await api("/api/logout", {});
