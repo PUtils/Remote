@@ -1,0 +1,81 @@
+.TH rt 1 "September 2024" "rt 1.0" "Remote Terminal Control"
+.SH NAME
+rt \- Remote terminal client for accessing your computer via SSH and web interfaces
+
+.SH SYNOPSIS
+.B rt
+.RB [\-l
+.RB [\fIDIRECTORY\fR]]
+.RB [\-h]
+.RB [\-s
+.IR SOCKET ]
+.RB [\-p
+.IR PASSWORD ]
+.RB [\-\-help]
+
+.SH DESCRIPTION
+.B rt
+is a secure remote terminal client that connects to a
+.B rtd
+daemon running on your machine. It provides multiple connection methods:
+.IP \(bu 2
+Interactive SSH terminal access through a Cloudflare tunnel
+.IP \(bu 2
+Browser-based web terminal for monitoring and hibernation control
+.IP \(bu 2
+Sandboxed directory access for running Claude Code on other machines
+
+.SH OPTIONS
+.TP
+.B \-l \fR[\fIDIRECTORY\fR]
+Start an interactive remote shell session. If
+.I DIRECTORY
+is provided, the session is restricted to that directory (sandbox mode).
+If no directory is given, the current working directory is used.
+.TP
+.B \-h
+Access the hibernation control panel via web interface. When in hibernation mode,
+the remote will refuse all new requests and close existing sessions.
+.TP
+.B \-s \fISOCKET\fR
+Specify the Unix socket path for daemon communication
+.RB (default:
+.IR /tmp/rt.sock ).
+.TP
+.B \-p \fIPASSWORD\fR
+Provide the authentication password. Required for all connections.
+.TP
+.B \-\-help
+Display help message and exit.
+
+.SH USAGE EXAMPLES
+.TP
+Start a remote shell in the current directory:
+.B rt \-l \-p mypassword
+
+.TP
+Start a remote shell in a specific directory (sandbox mode):
+.B rt \-l /path/to/project \-p mypassword
+
+.TP
+Access hibernation control panel:
+.B rt \-h \-p mypassword
+
+.SH SECURITY NOTES
+.IP \(bu 2
+Always set a strong password with
+.B rtd
+.IP \(bu 2
+Failed authentication attempts trigger exponential backoff and temporary lockout
+.IP \(bu 2
+All traffic should be protected by SSH or Cloudflare tunnel encryption
+.IP \(bu 2
+Sandbox mode restricts filesystem access to the specified directory only
+
+.SH SEE ALSO
+.BR rtd (1),
+.BR ssh (1),
+.BR chroot (2)
+
+.SH AUTHOR
+Implemented as part of the PUtils remote access suite.
