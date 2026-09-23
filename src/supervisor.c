@@ -50,7 +50,7 @@ struct token {
 struct tunnel {
     const char *what;
     char url_arg[64];
-    pid_t pid;
+    pid_t pid, probe;
     int fd;
     size_t len;
     time_t restart_at;
@@ -65,6 +65,7 @@ static struct web webs[MAX_WEB];
 static struct token tokens[MAX_TOKENS];
 static struct tunnel tunnels[2];
 static int ntunnels;
+static char join_cmd[512];
 static int hib, fails;
 static time_t next_try, locked_until;
 static int sigp[2];
@@ -287,6 +288,121 @@ static void tunnel_start(struct tunnel *t)
     t->url[0] = '\0';
 }
 
+/* Runs argv and reports whether its output contains want within secs. */
+static int run_expect(char *const argv[], const char *want, int secs)
+{
+    int in[2], out[2];
+    if (pipe(in) != 0)
+        return 0;
+    if (pipe(out) != 0) {
+        close(in[0]);
+        close(in[1]);
+        return 0;
+    }
+    pid_t pid = fork();
+    if (pid == 0) {
+        dup2(in[0], 0);
+        dup2(out[1], 1);
+        dup2(out[1], 2);
+        for (int fd = 3, max = getdtablesize(); fd < max; fd++)
+            close(fd);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(in[0]);
+    close(out[1]);
+    char buf[4096];
+    size_t len = 0;
+    int found = 0;
+    time_t end = time(NULL) + secs;
+    while (pid > 0 && !found && time(NULL) < end) {
+        struct pollfd p = {out[0], POLLIN, 0};
+        if (poll(&p, 1, 500) <= 0)
+            continue;
+        ssize_t n = read(out[0], buf + len, sizeof buf - 1 - len);
+        if (n <= 0)
+            break;
+        len += (size_t)n;
+        buf[len] = '\0';
+        found = strstr(buf, want) != NULL;
+        if (len > sizeof buf - 512) {
+            memmove(buf, buf + len - 64, 64);
+            len = 64;
+        }
+    }
+    if (pid > 0) {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+    }
+    close(in[1]);
+    close(out[0]);
+    return found;
+}
+
+/*
+ * A quick tunnel's name reaches public DNS a few seconds after cloudflared
+ * prints it, and a client that looks it up too early caches the miss. So the
+ * address is only announced once it resolves and answers end to end.
+ */
+static int probe(const struct tunnel *t)
+{
+    char *host = (char *)t->url + strlen("https://");
+    char *dig[] = {"dig", "+short", "+time=2", "+tries=1", host, "@1.1.1.1", "A", NULL};
+    int resolved = 0;
+    for (int i = 0; i < 45 && !resolved; i++)
+        if (!(resolved = run_expect(dig, ".", 5)))
+            sleep(2);
+    if (!resolved)
+        return 2;
+    char *ssh[] = {"cloudflared", "access", "ssh", "--hostname", host, NULL};
+    char *web[] = {"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10",
+                   (char *)t->url, NULL};
+    int is_ssh = strcmp(t->what, "ssh") == 0;
+    for (int i = 0; i < 8; i++) {
+        if (run_expect(is_ssh ? ssh : web, is_ssh ? "SSH-2.0" : "200", 12))
+            return 0;
+        sleep(3);
+    }
+    return 3;
+}
+
+static void probe_start(struct tunnel *t)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        setsid();
+        for (int sig = 1; sig < NSIG; sig++)
+            signal(sig, SIG_DFL);
+        _exit(probe(t));
+    }
+    t->probe = pid > 0 ? pid : 0;
+}
+
+static void announce(struct tunnel *t, int ok)
+{
+    const char *host = t->url + strlen("https://");
+    if (strcmp(t->what, "ssh") != 0) {
+        logmsg("%s phone panel: %s", ok ? "ready," : "not confirmed yet (may need a minute),", t->url);
+        return;
+    }
+    snprintf(join_cmd, sizeof join_cmd,
+             "ssh -o \"ProxyCommand=cloudflared access ssh --hostname %%h\" %s", host);
+    if (ok)
+        logmsg("ready. Join from another computer (it needs cloudflared):");
+    else
+        logmsg("tunnel not confirmed yet; this may need another minute:");
+    fprintf(stderr,
+            "\n    %s\n\n"
+            "    To let agents reuse one login, put this in ~/.ssh/config and run `ssh mac`:\n"
+            "      Host mac\n"
+            "        HostName %s\n"
+            "        ProxyCommand cloudflared access ssh --hostname %%h\n"
+            "        ControlMaster auto\n"
+            "        ControlPath ~/.ssh/cm-%%C\n"
+            "        ControlPersist 4h\n\n",
+            join_cmd, host);
+}
+
 static void tunnel_read(struct tunnel *t)
 {
     ssize_t n = read(t->fd, t->buf + t->len, sizeof t->buf - 1 - t->len);
@@ -310,22 +426,8 @@ static void tunnel_read(struct tunnel *t)
         s -= 8;
         e += strlen(".trycloudflare.com");
         snprintf(t->url, sizeof t->url, "%.*s", (int)(e - s), s);
-        const char *host = t->url + strlen("https://");
-        if (strcmp(t->what, "ssh") == 0) {
-            logmsg("ssh tunnel: %s", host);
-            fprintf(stderr,
-                    "      connect:  ssh -o ProxyCommand='cloudflared access ssh --hostname %%h' %s\n"
-                    "      ~/.ssh/config:\n"
-                    "        Host mac\n"
-                    "          HostName %s\n"
-                    "          ProxyCommand cloudflared access ssh --hostname %%h\n"
-                    "          ControlMaster auto\n"
-                    "          ControlPath ~/.ssh/cm-%%C\n"
-                    "          ControlPersist 4h\n",
-                    host, host);
-        } else {
-            logmsg("phone panel: %s", t->url);
-        }
+        logmsg("%s tunnel created, checking that it answers...", t->what);
+        probe_start(t);
         t->len = 0;
     } else if (t->len > sizeof t->buf / 2) {
         memmove(t->buf, t->buf + t->len - 256, 256);
@@ -406,6 +508,8 @@ static void state_json(char *out, size_t cap)
     size_t n = (size_t)snprintf(out, cap, "{\"hibernating\":%s,\"sandbox\":%s,\"dir\":",
                                 hib ? "true" : "false", cfg->sandbox ? "true" : "false");
     n += json_str(out + n, cap - n, cfg->dir);
+    n += (size_t)snprintf(out + n, cap - n, ",\"join\":");
+    n += join_cmd[0] ? json_str(out + n, cap - n, join_cmd) : (size_t)snprintf(out + n, cap - n, "null");
     n += (size_t)snprintf(out + n, cap - n, ",\"sessions\":[");
     int first = 1;
     for (int i = 0; i < RT_MAX_CONNS && n < cap - 256; i++) {
@@ -707,9 +811,20 @@ static void reap(void)
         }
         for (int i = 0; i < ntunnels; i++) {
             struct tunnel *t = &tunnels[i];
+            if (t->probe == p) {
+                t->probe = 0;
+                if (!stopping && t->pid > 0)
+                    announce(t, WIFEXITED(st) && WEXITSTATUS(st) == 0);
+            }
             if (t->pid != p)
                 continue;
             t->pid = 0;
+            if (strcmp(t->what, "ssh") == 0)
+                join_cmd[0] = '\0';
+            if (t->probe > 0) {
+                killpg(t->probe, SIGKILL);
+                t->probe = 0;
+            }
             if (!stopping) {
                 logmsg("%s tunnel stopped; restarting (the address will change)", t->what);
                 t->restart_at = time(NULL) + 5;
@@ -822,9 +937,12 @@ int supervise(struct config *c, struct pwhash *h, int ssh_fd, int ssh_port, int 
 
     logmsg("shutting down");
     kill_all();
-    for (int i = 0; i < ntunnels; i++)
+    for (int i = 0; i < ntunnels; i++) {
         if (tunnels[i].pid > 0)
             kill(tunnels[i].pid, SIGTERM);
+        if (tunnels[i].probe > 0)
+            killpg(tunnels[i].probe, SIGKILL);
+    }
     for (int t = 0; t < 30; t++) {
         int alive = 0;
         reap();

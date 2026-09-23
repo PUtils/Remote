@@ -65,13 +65,19 @@ Without
 .Fl l ,
 sessions have the user's full access and start in the current directory.
 .Sh CONNECTING
+When the tunnel starts,
 .Nm
-prints the tunnel host name when it is ready.
+waits until its name resolves in public DNS and an SSH handshake succeeds
+through it, then prints the command to join.
+Using a quick tunnel's name too early makes the client cache a failed
+lookup.
 The client needs
 .Xr cloudflared 1 :
 .Bd -literal -offset indent
-ssh -o ProxyCommand='cloudflared access ssh --hostname %h' HOST
+ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" HOST
 .Ed
+.Pp
+The same command is shown in the phone panel, with a copy button.
 .Pp
 It also prints an
 .Pa ~/.ssh/config

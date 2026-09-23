@@ -91,6 +91,18 @@ button.big { min-height: 64px; font-size: 18px; }
 button.big.wake { background: var(--on); border-color: var(--on); color: var(--accent-text); }
 button.link { background: none; border: none; color: var(--muted); display: block; margin: 4px auto 0; }
 
+#join-cmd {
+  display: block;
+  font: 14px/1.4 ui-monospace, Menlo, monospace;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
 #sessions { list-style: none; margin: 0; padding: 0; }
 #sessions li {
   display: flex; align-items: center; gap: 12px;

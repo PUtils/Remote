@@ -53,6 +53,9 @@ function render(s) {
   toggle.classList.toggle("wake", s.hibernating);
   toggle.dataset.action = s.hibernating ? "wake" : "hibernate";
 
+  $("#join").hidden = !s.join;
+  if (s.join) $("#join-cmd").textContent = s.join;
+
   const dir = $("#dir");
   if (document.activeElement !== dir) dir.value = s.dir;
   $("#dir-note").textContent = s.sandbox
@@ -134,6 +137,18 @@ $("#cd").addEventListener("submit", async (e) => {
   const ok = handle(await api("/api/cd", { dir: $("#dir").value.trim() }), form);
   btn.disabled = false;
   if (ok) $("#dir").blur();
+});
+
+$("#copy").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  try {
+    await navigator.clipboard.writeText($("#join-cmd").textContent);
+    btn.textContent = "Copied";
+  } catch {
+    getSelection().selectAllChildren($("#join-cmd"));
+    btn.textContent = "Selected; copy it from the menu";
+  }
+  setTimeout(() => { btn.textContent = "Copy command"; }, 2500);
 });
 
 $("#logout").addEventListener("click", async () => {

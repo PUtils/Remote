@@ -21,10 +21,10 @@ rt -k ~/.ssh/authorized_keys   # require a listed key as well as the password
 rt -n               # no tunnel, 127.0.0.1 only
 ```
 
-`rt` asks for a password (12+ characters) at startup, then prints the tunnel host, an `ssh` command and an `~/.ssh/config` entry with connection sharing, so agents can reuse a session you logged into once:
+`rt` asks for a password (12+ characters) at startup. Once the tunnel resolves and answers an SSH handshake, `rt` prints the join command (also shown in the phone panel) and an `~/.ssh/config` entry with connection sharing, so agents can reuse a session you logged into once:
 
 ```sh
-ssh -o ProxyCommand='cloudflared access ssh --hostname %h' HOST
+ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" HOST
 ssh mac 'git status'          # after adding the printed config entry
 ```
 

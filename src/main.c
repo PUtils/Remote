@@ -240,5 +240,7 @@ int main(int argc, char **argv)
     logmsg("ssh on 127.0.0.1:%d%s", ssh_port, cfg.keys[0] ? " (key + password)" : "");
     if (cfg.panel)
         logmsg("panel on http://127.0.0.1:%d", http_port);
+    else
+        logmsg("phone panel is off; start with `rt -h` to hibernate/wake from your phone");
     return supervise(&cfg, &pw, ssh_fd, ssh_port, http_fd, http_port);
 }
