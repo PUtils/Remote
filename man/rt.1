@@ -118,10 +118,16 @@ machine they came from.
 .Pp
 .Ic peer
 connects to the client's own sshd through the reverse tunnel, so the client
-must accept that login; set
+must accept that login.
+It logs in as the name the client used to join
+.Pq the value of Ev RT_PEER_USER , No which defaults to that name ,
+so a key the client already trusts makes
+.Ic peer
+passwordless; otherwise the client's password is asked.
+Override the login by setting
 .Ev RT_PEER_USER
-to the client login (it defaults to the Mac user) and have a key the client
-trusts, or a password is asked.
+before
+.Ic peer .
 Only loopback forwards are accepted, and only with
 .Fl b ;
 without it all forwarding is refused, as usual.
