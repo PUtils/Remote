@@ -20,6 +20,7 @@ struct config {
     int persist;
     int logging;
     char logdir[PATH_MAX];
+    char runcmd[256];
     char relay[32];
     char relay_kh[PATH_MAX];
     char fingerprint[128];

@@ -246,7 +246,8 @@ static void accept_ssh(int lfd)
         snprintf(cleanup_flag, sizeof cleanup_flag, "%d", cfg->cleanup);
         snprintf(bidi_flag, sizeof bidi_flag, "%d", cfg->bidi);
         char *argv[] = {"rt", "--conn", cfg->hostkey, cfg->keys[0] ? cfg->keys : "-",
-                        cfg->sbhome, cfg->state, cleanup_flag, bidi_flag, NULL};
+                        cfg->sbhome, cfg->state, cleanup_flag, bidi_flag,
+                        cfg->runcmd[0] ? cfg->runcmd : "-", NULL};
         execv(cfg->self, argv);
         _exit(127);
     }

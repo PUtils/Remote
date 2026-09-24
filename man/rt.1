@@ -15,6 +15,7 @@
 .Op Fl w Op Ar dir
 .Op Fl b
 .Op Fl p
+.Op Fl C Ar cmd
 .Nm remote
 .Op Ar same options
 .Sh DESCRIPTION
@@ -149,6 +150,18 @@ exits normally.
 If lid-closed sleep was already disabled,
 .Nm
 leaves it untouched.
+.It Fl C Ar cmd
+Run
+.Ar cmd
+instead of a login shell when a client asks for an interactive shell, so a
+connection drops straight into
+.Ar cmd .
+Single commands
+.Pq Li ssh host 'cmd'
+are unaffected.
+This is how
+.Xr rtc 1
+starts Claude Code on connect.
 .El
 .Pp
 Without

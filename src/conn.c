@@ -64,6 +64,7 @@ static int cleanup_flag;
 static int bidi_flag;
 static int fwd_listen = -1;
 static int peer_port;
+static const char *runcmd;
 
 static int load_keys(const char *path, ssh_key *out, int max)
 {
@@ -356,7 +357,7 @@ static int on_shell(ssh_session s, ssh_channel ch, void *ud)
 {
     (void)s;
     struct chan *c = mine(ch, ud);
-    return c ? start(c, NULL) : -1;
+    return c ? start(c, runcmd) : -1;
 }
 
 static int on_exec(ssh_session s, ssh_channel ch, const char *cmd, void *ud)
@@ -692,6 +693,7 @@ void conn_main(char **argv)
     cleanup_flag = argv[6] ? atoi(argv[6]) : 0;
     bidi_flag = argv[7] ? atoi(argv[7]) : 0;
     spawnctx.bidi = bidi_flag;
+    runcmd = (argv[8] && strcmp(argv[8], "-") != 0) ? argv[8] : NULL;
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);

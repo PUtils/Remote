@@ -8,10 +8,18 @@
 # the other machine with the bidirectional join command rt prints, then run
 # `claude` in the session.
 #
-# Usage: rtc [extra rt options]     e.g. rtc -h -p -l
+# Usage: rtc [-a] [extra rt options]     e.g. rtc -a -h -p
+#   -a, --auto   auto-start claude on connect (no need to type it in the session)
+#                the command is $RTC_CLAUDE_CMD, default "claude"
 set -eu
 
 WS="${RTC_WORKSPACE:-$HOME/.local/state/rt/agent}"
+
+AUTO=0
+if [ "${1:-}" = "-a" ] || [ "${1:-}" = "--auto" ]; then
+    AUTO=1
+    shift
+fi
 
 command -v rt >/dev/null 2>&1 ||
     { echo "rtc: rt is not installed (run 'make install' in the rt repo)" >&2; exit 1; }
@@ -59,8 +67,15 @@ EOF
 
 echo "rtc: workspace ready at $WS"
 echo "rtc: CLAUDE.md + peer permission installed"
+cd "$WS"
+if [ "$AUTO" = 1 ]; then
+    CMD="${RTC_CLAUDE_CMD:-claude}"
+    echo "rtc: auto-start on; connecting drops straight into '$CMD'"
+    echo "rtc: from the other machine, join with the -b command below."
+    echo
+    exec rt -b -C "$CMD" "$@"
+fi
 echo "rtc: starting 'rt -b $*'; from the other machine, join with the -b command below,"
 echo "rtc: then run 'claude' in the session."
 echo
-cd "$WS"
 exec rt -b "$@"

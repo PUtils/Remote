@@ -23,7 +23,7 @@ static const char *prog = "rt";
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]] [-b] [-p]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]] [-b] [-p] [-C cmd]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
@@ -33,6 +33,7 @@ static void usage(FILE *f)
             "  -b         bidirectional: a client that joins with `ssh -R` can be reached\n"
             "             back from the session with the `peer` command\n"
             "  -p         persist with the lid closed (sudo pmset disablesleep; undone on exit)\n"
+            "  -C cmd     run cmd instead of a login shell for interactive sessions\n"
             "rt and remote are the same command. See man rt.\n",
             prog);
 }
@@ -237,7 +238,7 @@ static void restore_sleep(void)
 
 int main(int argc, char **argv)
 {
-    if (argc == 8 && strcmp(argv[1], "--conn") == 0)
+    if (argc == 9 && strcmp(argv[1], "--conn") == 0)
         conn_main(argv);
     if (argc == 4 && strcmp(argv[1], "--web") == 0)
         web_main(argv);
@@ -281,6 +282,13 @@ int main(int argc, char **argv)
                     return 2;
                 }
                 keyarg = argv[++i];
+                break;
+            case 'C':
+                if (p[1] != '\0' || i + 1 >= argc) {
+                    usage(stderr);
+                    return 2;
+                }
+                strlcpy(cfg.runcmd, argv[++i], sizeof cfg.runcmd);
                 break;
             default:
                 usage(stderr);
