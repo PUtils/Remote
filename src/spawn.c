@@ -22,11 +22,17 @@ static char **build_env(char *const *cenv, int ncenv, const char *shell, const c
     const char *home = spawnctx.sandboxed ? spawnctx.sbhome : pw->pw_dir;
     const char *path = getenv("PATH");
     const char *tmp = getenv("TMPDIR");
-    char **e = calloc((size_t)ncenv + 12, sizeof *e);
+    char **e = calloc((size_t)ncenv + 14, sizeof *e);
     int n = 0;
     for (int i = 0; i < ncenv; i++)
         e[n++] = strdup(cenv[i]);
-    asprintf(&e[n++], "PATH=%s", path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
+    if (spawnctx.peer_port > 0)
+        asprintf(&e[n++], "PATH=%s/bin:%s", spawnctx.statedir,
+                 path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
+    else
+        asprintf(&e[n++], "PATH=%s", path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
+    if (spawnctx.peer_port > 0)
+        asprintf(&e[n++], "RT_PEER_PORT=%d", spawnctx.peer_port);
     asprintf(&e[n++], "HOME=%s", home);
     asprintf(&e[n++], "USER=%s", pw->pw_name);
     asprintf(&e[n++], "LOGNAME=%s", pw->pw_name);

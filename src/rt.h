@@ -16,6 +16,7 @@ struct config {
     int tunnel;
     int cloudflared;
     int cleanup;
+    int bidi;
     int logging;
     char logdir[PATH_MAX];
     char relay[32];
@@ -43,6 +44,7 @@ void web_main(char **argv) __attribute__((noreturn));
 struct spawnctx {
     char dir[PATH_MAX];
     int sandboxed;
+    int peer_port;
     const char *sbhome, *statedir;
 };
 extern struct spawnctx spawnctx;

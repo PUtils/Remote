@@ -242,10 +242,11 @@ static void accept_ssh(int lfd)
         int a = fcntl(fd, F_DUPFD, 10), b = fcntl(sp[1], F_DUPFD, 10);
         dup2(a, 3);
         dup2(b, 4);
-        char cleanup_flag[2];
+        char cleanup_flag[2], bidi_flag[2];
         snprintf(cleanup_flag, sizeof cleanup_flag, "%d", cfg->cleanup);
+        snprintf(bidi_flag, sizeof bidi_flag, "%d", cfg->bidi);
         char *argv[] = {"rt", "--conn", cfg->hostkey, cfg->keys[0] ? cfg->keys : "-",
-                        cfg->sbhome, cfg->state, cleanup_flag, NULL};
+                        cfg->sbhome, cfg->state, cleanup_flag, bidi_flag, NULL};
         execv(cfg->self, argv);
         _exit(127);
     }

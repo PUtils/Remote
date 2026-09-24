@@ -23,13 +23,15 @@ static const char *prog = "rt";
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]] [-b]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
             "  -n         no relay or Cloudflare tunnel; listen on localhost only\n"
             "  -c         clean up shell history and SSH config after disconnect\n"
             "  -w [dir]   also append the log to dir/rt.log (default: current directory)\n"
+            "  -b         bidirectional: a client that joins with `ssh -R` can be reached\n"
+            "             back from the session with the `peer` command\n"
             "rt and remote are the same command. See man rt.\n",
             prog);
 }
@@ -49,6 +51,33 @@ static int mkdirs(const char *path)
     if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
         return -1;
     return chmod(tmp, 0700);
+}
+
+/*
+ * A small wrapper the session runs to reach the client that joined with
+ * `ssh -R`. rt sets RT_PEER_PORT in the session; the client's own sshd does the
+ * authenticating, so pick the login with RT_PEER_USER (defaults to $USER).
+ */
+static int write_peer(const char *state)
+{
+    static const char script[] =
+        "#!/bin/sh\n"
+        "[ -n \"$RT_PEER_PORT\" ] || { echo 'peer: this session is not bidirectional"
+        " (the client did not join with ssh -R)' >&2; exit 1; }\n"
+        "exec ssh -o StrictHostKeyChecking=accept-new"
+        " -o UserKnownHostsFile=\"${TMPDIR:-/tmp}/rt_peer_known_hosts\""
+        " -p \"$RT_PEER_PORT\" \"${RT_PEER_USER:-$USER}@127.0.0.1\" \"$@\"\n";
+    char dir[PATH_MAX], path[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s/bin", state);
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST)
+        return -1;
+    snprintf(path, sizeof path, "%s/peer", dir);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0700);
+    if (fd < 0)
+        return -1;
+    ssize_t n = write(fd, script, sizeof script - 1);
+    close(fd);
+    return n == (ssize_t)(sizeof script - 1) ? 0 : -1;
 }
 
 static int listen_local(int *port)
@@ -177,7 +206,7 @@ static void keep_awake(void)
 
 int main(int argc, char **argv)
 {
-    if (argc == 7 && strcmp(argv[1], "--conn") == 0)
+    if (argc == 8 && strcmp(argv[1], "--conn") == 0)
         conn_main(argv);
     if (argc == 4 && strcmp(argv[1], "--web") == 0)
         web_main(argv);
@@ -208,6 +237,7 @@ int main(int argc, char **argv)
             case 'h': cfg.panel = 1; break;
             case 'n': cfg.tunnel = 0; break;
             case 'c': cfg.cleanup = 1; break;
+            case 'b': cfg.bidi = 1; break;
             case 'w':
                 cfg.logging = 1;
                 if (p[1] == '\0' && i + 1 < argc && argv[i + 1][0] != '-')
@@ -272,6 +302,10 @@ int main(int argc, char **argv)
     snprintf(sbtmp, sizeof sbtmp, "%s/.tmp", cfg.sbhome);
     if (mkdirs(cfg.state) != 0 || mkdirs(cfg.sbhome) != 0 || mkdirs(sbtmp) != 0) {
         fprintf(stderr, "rt: cannot create %s\n", cfg.state);
+        return 1;
+    }
+    if (cfg.bidi && write_peer(cfg.state) != 0) {
+        fprintf(stderr, "rt: cannot create the peer helper in %s\n", cfg.state);
         return 1;
     }
 

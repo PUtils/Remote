@@ -6,6 +6,7 @@
 #include <libssh/callbacks.h>
 #include <libssh/libssh.h>
 #include <libssh/server.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
@@ -22,6 +23,7 @@
 #define MAX_CHANS 8
 #define MAX_ENV 16
 #define MAX_KEYS 32
+#define MAX_FWDS 16
 #define CLIENT_FD 3
 #define SUP_FD 4
 
@@ -41,7 +43,17 @@ struct chan {
     int cleanup;
 };
 
+/* A live reverse-forwarded connection: a socket the session opened on the Mac,
+ * bridged to a forwarded-tcpip channel that carries it back to the client. */
+struct fwd {
+    int used;
+    int sock;
+    ssh_channel ch;
+    struct ssh_channel_callbacks_struct cb;
+};
+
 static struct chan chans[MAX_CHANS];
+static struct fwd fwds[MAX_FWDS];
 static ssh_session sess;
 static ssh_event ev;
 static ssh_key keys[MAX_KEYS];
@@ -49,6 +61,9 @@ static int nkeys, key_ok, authed, drop, pw_fails;
 static int chld_pipe[2] = {-1, -1};
 static volatile sig_atomic_t got_term;
 static int cleanup_flag;
+static int bidi_flag;
+static int fwd_listen = -1;
+static int peer_port;
 
 static int load_keys(const char *path, ssh_key *out, int max)
 {
@@ -345,6 +360,161 @@ static int on_exec(ssh_session s, ssh_channel ch, const char *cmd, void *ud)
     return c ? start(c, cmd) : -1;
 }
 
+/* ---- reverse forwarding (-b): reach the client that joined with ssh -R ---- */
+
+static struct fwd *fwd_of(ssh_channel ch, void *ud)
+{
+    struct fwd *f = ud;
+    return f && f->used && f->ch == ch ? f : NULL;
+}
+
+/* client -> Mac socket: bytes coming back from the client's sshd */
+static int on_fwd_chan_data(ssh_session s, ssh_channel ch, void *data, uint32_t len,
+                            int is_stderr, void *ud)
+{
+    (void)s; (void)is_stderr;
+    struct fwd *f = fwd_of(ch, ud);
+    if (f && f->sock >= 0)
+        write_all(f->sock, data, len);
+    return (int)len;
+}
+
+static void on_fwd_chan_close(ssh_session s, ssh_channel ch, void *ud)
+{
+    (void)s;
+    struct fwd *f = fwd_of(ch, ud);
+    if (f && f->sock >= 0)
+        shutdown(f->sock, SHUT_RDWR);
+}
+
+/* Mac socket -> client: bytes from whoever connected to the peer port */
+static int on_fwd_sock(socket_t fd, int revents, void *ud)
+{
+    (void)revents;
+    struct fwd *f = ud;
+    if (!f->used || f->sock != fd)
+        return 0;
+    char buf[16384];
+    ssize_t n = read(fd, buf, sizeof buf);
+    if (n > 0) {
+        if (ssh_channel_is_open(f->ch))
+            ssh_channel_write(f->ch, buf, (uint32_t)n);
+        return 0;
+    }
+    if (n < 0 && (errno == EAGAIN || errno == EINTR))
+        return 0;
+    if (ssh_channel_is_open(f->ch))
+        ssh_channel_send_eof(f->ch);
+    return 0;
+}
+
+static int on_fwd_accept(socket_t fd, int revents, void *ud)
+{
+    (void)revents; (void)ud;
+    if (fd != fwd_listen)
+        return 0;
+    struct sockaddr_in a;
+    socklen_t al = sizeof a;
+    int s = accept(fwd_listen, (struct sockaddr *)&a, &al);
+    if (s < 0)
+        return 0;
+    struct fwd *f = NULL;
+    for (int i = 0; i < MAX_FWDS && !f; i++)
+        if (!fwds[i].used)
+            f = &fwds[i];
+    if (!f) {
+        close(s);
+        return 0;
+    }
+    ssh_channel ch = ssh_channel_new(sess);
+    if (!ch) {
+        close(s);
+        return 0;
+    }
+    if (ssh_channel_open_reverse_forward(ch, "127.0.0.1", peer_port, "127.0.0.1",
+                                         ntohs(a.sin_port)) != SSH_OK) {
+        ssh_channel_free(ch);
+        close(s);
+        return 0;
+    }
+    memset(f, 0, sizeof *f);
+    f->used = 1;
+    f->sock = s;
+    f->ch = ch;
+    f->cb.userdata = f;
+    f->cb.channel_data_function = on_fwd_chan_data;
+    f->cb.channel_close_function = on_fwd_chan_close;
+    ssh_callbacks_init(&f->cb);
+    ssh_set_channel_callbacks(ch, &f->cb);
+    fcntl(s, F_SETFD, FD_CLOEXEC);
+    fcntl(s, F_SETFL, O_NONBLOCK);
+    ssh_event_add_fd(ev, s, POLLIN, on_fwd_sock, f);
+    return 0;
+}
+
+static int start_forward_listener(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t al = sizeof a;
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0 || listen(fd, 8) != 0 ||
+        getsockname(fd, (struct sockaddr *)&a, &al) != 0) {
+        close(fd);
+        return -1;
+    }
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    peer_port = ntohs(a.sin_port);
+    fwd_listen = fd;
+    spawnctx.peer_port = peer_port;
+    ssh_event_add_fd(ev, fd, POLLIN, on_fwd_accept, NULL);
+    return 0;
+}
+
+static int is_loopback(const char *addr)
+{
+    return !addr || !addr[0] || strcmp(addr, "127.0.0.1") == 0 ||
+           strcmp(addr, "localhost") == 0 || strcmp(addr, "::1") == 0;
+}
+
+static void on_global(ssh_session s, ssh_message m, void *ud)
+{
+    (void)s; (void)ud;
+    if (bidi_flag && ssh_message_type(m) == SSH_REQUEST_GLOBAL &&
+        ssh_message_subtype(m) == SSH_GLOBAL_REQUEST_TCPIP_FORWARD &&
+        is_loopback(ssh_message_global_request_address(m))) {
+        if (fwd_listen < 0 && start_forward_listener() == 0)
+            tell('I', "connected (bidirectional; peer reachable)");
+        if (fwd_listen >= 0) {
+            ssh_message_global_request_reply_success(m, (uint16_t)peer_port);
+            return;
+        }
+    }
+    ssh_message_reply_default(m);
+}
+
+static void fwd_reap(void)
+{
+    for (int i = 0; i < MAX_FWDS; i++) {
+        struct fwd *f = &fwds[i];
+        if (f->used && !ssh_channel_is_open(f->ch)) {
+            if (f->sock >= 0) {
+                ssh_event_remove_fd(ev, f->sock);
+                close(f->sock);
+                f->sock = -1;
+            }
+            ssh_remove_channel_callbacks(f->ch, &f->cb);
+            ssh_channel_free(f->ch);
+            f->used = 0;
+        }
+    }
+}
+
 static ssh_channel open_session(ssh_session s, void *ud)
 {
     (void)ud;
@@ -514,6 +684,7 @@ void conn_main(char **argv)
     spawnctx.sbhome = argv[4];
     spawnctx.statedir = argv[5];
     cleanup_flag = argv[6] ? atoi(argv[6]) : 0;
+    bidi_flag = argv[7] ? atoi(argv[7]) : 0;
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
@@ -541,6 +712,12 @@ void conn_main(char **argv)
     };
     ssh_callbacks_init(&scb);
     ssh_set_server_callbacks(sess, &scb);
+
+    static struct ssh_callbacks_struct gcb = {
+        .global_request_function = on_global,
+    };
+    ssh_callbacks_init(&gcb);
+    ssh_set_callbacks(sess, &gcb);
     ssh_set_auth_methods(sess, nkeys > 0 ? SSH_AUTH_METHOD_PUBLICKEY : SSH_AUTH_METHOD_PASSWORD);
 
     if (ssh_handle_key_exchange(sess) != SSH_OK)
@@ -569,6 +746,7 @@ void conn_main(char **argv)
     while (!got_term) {
         int r = ssh_event_dopoll(ev, 1000);
         housekeeping();
+        fwd_reap();
         if (r == SSH_ERROR || !ssh_is_connected(sess))
             break;
     }

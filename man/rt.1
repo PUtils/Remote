@@ -13,6 +13,7 @@
 .Op Fl n
 .Op Fl c
 .Op Fl w Op Ar dir
+.Op Fl b
 .Nm remote
 .Op Ar same options
 .Sh DESCRIPTION
@@ -37,7 +38,10 @@ and SSH connection sharing
 .Pq Cm ControlMaster
 all work, so an agent can reuse a connection you logged into once without
 knowing the password.
-Port forwarding, agent forwarding and X11 forwarding are not supported.
+Agent forwarding and X11 forwarding are not supported, and forwarding is
+refused unless
+.Fl b
+is given, which allows only a loopback reverse forward (see below).
 .Pp
 The options are:
 .Bl -tag -width Ds
@@ -93,6 +97,33 @@ mode so earlier runs are kept.
 This is independent of
 .Fl l ;
 each option takes its own directory.
+.It Fl b
+Bidirectional.
+Normally a session can only run commands on the Mac.
+With
+.Fl b ,
+a client that joins with a reverse forward
+.Pq Li ssh -R 127.0.0.1:0:127.0.0.1:22 ...
+can be reached back from inside the session with the
+.Ic peer
+command, so one session drives both machines:
+plain commands run on the Mac, and
+.Ic peer Ar cmd
+runs
+.Ar cmd
+on the client.
+This is meant for agents that log in to the Mac and also need to act on the
+machine they came from.
+.Pp
+.Ic peer
+connects to the client's own sshd through the reverse tunnel, so the client
+must accept that login; set
+.Ev RT_PEER_USER
+to the client login (it defaults to the Mac user) and have a key the client
+trusts, or a password is asked.
+Only loopback forwards are accepted, and only with
+.Fl b ;
+without it all forwarding is refused, as usual.
 .El
 .Pp
 Without
