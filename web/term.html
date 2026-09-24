@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>rt terminal</title>
+<link rel="stylesheet" href="/xterm.css">
+<link rel="stylesheet" href="/term.css">
+<script src="/xterm.js" defer></script>
+<script src="/addon-fit.js" defer></script>
+<script src="/term.js" defer></script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a id="back" href="/">‹ Panel</a>
+    <span id="status" role="status">Connecting…</span>
+    <button id="new" type="button" hidden>New session</button>
+  </header>
+  <div id="term"></div>
+  <div id="keys" role="toolbar" aria-label="Extra keys">
+    <button type="button" tabindex="-1" data-key="esc">Esc</button>
+    <button type="button" tabindex="-1" data-key="tab">Tab</button>
+    <button type="button" tabindex="-1" data-mod="ctrl" aria-pressed="false">Ctrl</button>
+    <button type="button" tabindex="-1" data-key="up" aria-label="Up">↑</button>
+    <button type="button" tabindex="-1" data-key="down" aria-label="Down">↓</button>
+    <button type="button" tabindex="-1" data-key="left" aria-label="Left">←</button>
+    <button type="button" tabindex="-1" data-key="right" aria-label="Right">→</button>
+    <button type="button" tabindex="-1" data-text="|">|</button>
+    <button type="button" tabindex="-1" data-text="~">~</button>
+    <button type="button" tabindex="-1" data-text="-">-</button>
+    <button type="button" tabindex="-1" data-text="/">/</button>
+    <button type="button" tabindex="-1" data-paste>Paste</button>
+  </div>
+</div>
+</body>
+</html>

@@ -85,6 +85,11 @@ button {
   color: var(--text);
   cursor: pointer;
 }
+a.button {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 46px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font-weight: 600; text-decoration: none;
+}
 button:disabled { opacity: 0.55; cursor: default; }
 button.primary, button.big { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.big { min-height: 64px; font-size: 18px; }

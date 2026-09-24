@@ -44,12 +44,16 @@ They get a separate home directory,
 .Pa ~/.local/state/rt/home ,
 and cannot use the login keychain, open applications or send Apple Events.
 .It Fl h
-Also publish a phone panel.
-After logging in with the same password it can hibernate and wake
+Also publish a web page for phones and browsers, behind the same password.
+Its panel can hibernate and wake
 .Nm ,
 change the directory new sessions start in, and close sessions.
 While hibernating, every open session is closed and new connections are
 refused.
+Its terminal runs a shell in the browser, with a row of Esc, Tab, Ctrl and
+arrow keys on touch screens.
+The shell keeps running for 15 minutes after the page disconnects, as it does
+when a phone locks or switches apps, and the page reattaches to it.
 .It Fl k Ar keyfile
 Also require one of the public keys in
 .Ar keyfile

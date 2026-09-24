@@ -169,6 +169,8 @@ int main(int argc, char **argv)
 {
     if (argc == 6 && strcmp(argv[1], "--conn") == 0)
         conn_main(argv);
+    if (argc == 4 && strcmp(argv[1], "--web") == 0)
+        web_main(argv);
 
     static struct config cfg;
     const char *dirarg = NULL, *keyarg = NULL;

@@ -52,6 +52,7 @@ function render(s) {
   toggle.textContent = s.hibernating ? "Wake up" : "Hibernate";
   toggle.classList.toggle("wake", s.hibernating);
   toggle.dataset.action = s.hibernating ? "wake" : "hibernate";
+  $("#open-term").hidden = s.hibernating;
 
   const routes = [
     [s.join, "Works with plain ssh."],

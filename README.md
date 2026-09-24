@@ -38,6 +38,5 @@ The relay name is random, created once and kept, so the first command never chan
 - **SSH.** Shells, `ssh host 'cmd'`, `ControlMaster`. No port, agent or X11 forwarding. Host key in `~/.local/state/rt/host_ed25519`.
 - **Sandbox (`-l`).** macOS Seatbelt via `sandbox-exec`. The directory is read/write, installed tools are runnable, and the rest of home is unreadable. Nothing else is writable except temp dirs. The keychain, `open`, Apple Events and launchd jobs are blocked. Sessions get `HOME=~/.local/state/rt/home`, so Claude Code logs in once there, or gets a token via `ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN`.
 - **Panel (`-h`).** A phone page: hibernate or wake, change the directory, close sessions. Hibernating closes every session and refuses new ones.
+- **Browser terminal (`-h`).** xterm.js over a WebSocket, with an Esc/Tab/Ctrl/arrow key bar on touch screens. Each terminal is its own `rt --web` process that the supervisor hands authenticated sockets to. The shell survives a dropped connection (phone locked, app switched) for 15 minutes, and the page reattaches and replays recent output.
 - **Sleep.** `caffeinate -is` keeps the Mac awake, including with the screen locked. Lid-closed needs `sudo pmset -a disablesleep 1`.
-
-Not done yet: the browser terminal (xterm.js is vendored in `web/vendor`).

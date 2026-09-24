@@ -35,6 +35,16 @@ int pw_check(const struct pwhash *h, const char *pw);
 
 int count_keys(const char *path);
 void conn_main(char **argv) __attribute__((noreturn));
+void web_main(char **argv) __attribute__((noreturn));
+
+struct spawnctx {
+    char dir[PATH_MAX];
+    int sandboxed;
+    const char *sbhome, *statedir;
+};
+extern struct spawnctx spawnctx;
+pid_t spawn_command(const char *cmd, int slave, const int pipes[3], char *const *cenv, int ncenv,
+                    const char *term);
 
 int sandbox_tools(const char *home, char tools[][PATH_MAX], int max);
 int sandbox_profile(char *out, size_t cap, int ntools);

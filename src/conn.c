@@ -43,11 +43,8 @@ struct chan {
 static struct chan chans[MAX_CHANS];
 static ssh_session sess;
 static ssh_event ev;
-static const char *sbhome, *statedir;
 static ssh_key keys[MAX_KEYS];
 static int nkeys, key_ok, authed, drop, pw_fails;
-static char dir[PATH_MAX];
-static int sandboxed;
 static int chld_pipe[2] = {-1, -1};
 static volatile sig_atomic_t got_term;
 
@@ -125,8 +122,8 @@ static int auth_password(ssh_session s, const char *user, const char *pw, void *
         memset_s(msg, sizeof msg, 0, sizeof msg);
     }
     if (n >= 3 && r[0] == 'O') {
-        sandboxed = r[1] == '1';
-        strlcpy(dir, r + 2, sizeof dir);
+        spawnctx.sandboxed = r[1] == '1';
+        strlcpy(spawnctx.dir, r + 2, sizeof spawnctx.dir);
         authed = 1;
         return SSH_AUTH_SUCCESS;
     }
@@ -276,47 +273,6 @@ static int on_output(socket_t fd, int revents, void *ud)
     return 0;
 }
 
-static const char *user_shell(void)
-{
-    struct passwd *pw = getpwuid(getuid());
-    return pw && pw->pw_shell && pw->pw_shell[0] ? pw->pw_shell : "/bin/zsh";
-}
-
-static char **build_env(struct chan *c, const char *shell)
-{
-    struct passwd *pw = getpwuid(getuid());
-    const char *home = sandboxed ? sbhome : pw->pw_dir;
-    const char *path = getenv("PATH");
-    const char *tmp = getenv("TMPDIR");
-    char **e = calloc(MAX_ENV + 12, sizeof *e);
-    int n = 0;
-    for (int i = 0; i < c->nenv; i++)
-        e[n++] = strdup(c->env[i]);
-    asprintf(&e[n++], "PATH=%s", path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
-    asprintf(&e[n++], "HOME=%s", home);
-    asprintf(&e[n++], "USER=%s", pw->pw_name);
-    asprintf(&e[n++], "LOGNAME=%s", pw->pw_name);
-    asprintf(&e[n++], "SHELL=%s", shell);
-    if (sandboxed)
-        asprintf(&e[n++], "TMPDIR=%s/.tmp", sbhome);
-    else
-        asprintf(&e[n++], "TMPDIR=%s", tmp ? tmp : "/tmp");
-    e[n++] = strdup("LANG=en_US.UTF-8");
-    if (c->master >= 0)
-        asprintf(&e[n++], "TERM=%s", c->term[0] ? c->term : "xterm-256color");
-    if (sandboxed)
-        e[n++] = strdup("RT_SANDBOX=1");
-    e[n] = NULL;
-    return e;
-}
-
-static void free_env(char **e)
-{
-    for (int i = 0; e[i]; i++)
-        free(e[i]);
-    free(e);
-}
-
 static int start(struct chan *c, const char *cmd)
 {
     if (c->pid > 0)
@@ -329,76 +285,11 @@ static int start(struct chan *c, const char *cmd)
         snprintf(info, sizeof info, "%s", c->master >= 0 ? "shell" : "shell (no tty)");
     tell('I', info);
 
-    const char *shell = user_shell();
-    struct passwd *pw = getpwuid(getuid());
-    static char profile[8192];
-    static char tools[RT_MAX_TOOLS][PATH_MAX];
-    static char defs[RT_MAX_TOOLS + 4][PATH_MAX + 16];
-    char *argv[2 * (RT_MAX_TOOLS + 4) + 8];
-    int a = 0;
-
-    if (sandboxed) {
-        int nt = sandbox_tools(pw->pw_dir, tools, RT_MAX_TOOLS);
-        if (sandbox_profile(profile, sizeof profile, nt) != 0)
-            return -1;
-        argv[a++] = "/usr/bin/sandbox-exec";
-        argv[a++] = "-p";
-        argv[a++] = profile;
-        int d = 0;
-        snprintf(defs[d], sizeof defs[d], "HOME=%s", pw->pw_dir);
-        snprintf(defs[++d], sizeof defs[d], "DIR=%s", dir);
-        snprintf(defs[++d], sizeof defs[d], "STATE=%s", statedir);
-        snprintf(defs[++d], sizeof defs[d], "SBHOME=%s", sbhome);
-        for (int i = 0; i < nt; i++)
-            snprintf(defs[++d], sizeof defs[d], "T%d=%s", i, tools[i]);
-        for (int i = 0; i <= d; i++) {
-            argv[a++] = "-D";
-            argv[a++] = defs[i];
-        }
-    }
-    argv[a++] = (char *)shell;
-    if (cmd) {
-        argv[a++] = "-c";
-        argv[a++] = (char *)cmd;
-    } else {
-        argv[a++] = "-l";
-    }
-    argv[a] = NULL;
-
     int inp[2] = {-1, -1}, outp[2] = {-1, -1}, errp[2] = {-1, -1};
     if (c->master < 0 && (pipe(inp) || pipe(outp) || pipe(errp)))
         return -1;
-
-    char **envp = build_env(c, shell);
-    pid_t pid = fork();
-    if (pid == 0) {
-        setsid();
-        if (c->master >= 0) {
-            ioctl(c->slave, TIOCSCTTY, 0);
-            dup2(c->slave, 0);
-            dup2(c->slave, 1);
-            dup2(c->slave, 2);
-        } else {
-            dup2(inp[0], 0);
-            dup2(outp[1], 1);
-            dup2(errp[1], 2);
-        }
-        for (int fd = 3, max = getdtablesize(); fd < max; fd++)
-            close(fd);
-        for (int sig = 1; sig < NSIG; sig++)
-            signal(sig, SIG_DFL);
-        sigset_t none;
-        sigemptyset(&none);
-        sigprocmask(SIG_SETMASK, &none, NULL);
-        if (chdir(dir) != 0) {
-            dprintf(2, "rt: cannot enter %s\n", dir);
-            _exit(126);
-        }
-        execve(argv[0], argv, envp);
-        dprintf(2, "rt: cannot run %s\n", argv[0]);
-        _exit(127);
-    }
-    free_env(envp);
+    int child[3] = {inp[0], outp[1], errp[1]};
+    pid_t pid = spawn_command(cmd, c->slave, child, c->env, c->nenv, c->term);
 
     if (pid < 0) {
         int fds[] = {inp[0], inp[1], outp[0], outp[1], errp[0], errp[1]};
@@ -612,8 +503,8 @@ static void shutdown_children(void)
 void conn_main(char **argv)
 {
     const char *hostkey = argv[2], *keyfile = argv[3];
-    sbhome = argv[4];
-    statedir = argv[5];
+    spawnctx.sbhome = argv[4];
+    spawnctx.statedir = argv[5];
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);

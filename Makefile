@@ -6,9 +6,10 @@ CFLAGS += -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -fstack-protector-strong -D_
           $(shell pkg-config --cflags libssh) -Ibuild
 LDLIBS += $(shell pkg-config --libs libssh)
 
-SRC := src/main.c src/supervisor.c src/conn.c src/auth.c src/sandbox.c
+SRC := src/main.c src/supervisor.c src/conn.c src/auth.c src/sandbox.c src/spawn.c src/web.c
 OBJ := $(SRC:src/%.c=build/%.o)
-WEB := web/panel.html web/panel.css web/panel.js
+WEB := web/panel.html web/panel.css web/panel.js web/term.html web/term.css web/term.js \
+       web/vendor/xterm.js web/vendor/xterm.css web/vendor/addon-fit.js
 
 bin/rt: $(OBJ) | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
@@ -19,7 +20,7 @@ build/%.o: src/%.c src/rt.h | build
 build/supervisor.o: build/web.h
 
 build/web.h: $(WEB) | build
-	cd web && for f in panel.html panel.css panel.js; do xxd -i $$f; done > ../$@
+	cd web && for f in $(WEB:web/%=%); do xxd -i $$f; done > ../$@
 
 bin build:
 	mkdir -p $@

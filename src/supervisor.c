@@ -2,6 +2,7 @@
 #include "rt.h"
 #include "web.h"
 
+#include <CommonCrypto/CommonDigest.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -31,6 +32,8 @@ struct conn {
     int killing;
     time_t start, kill_at;
     char info[100];
+    int web;
+    unsigned char sid[16];
     pid_t groups[MAX_GROUPS];
     int ngroups;
 };
@@ -504,13 +507,13 @@ static void tunnel_read(struct tunnel *t)
 /* ---- web panel ---- */
 
 static const char sec_headers[] =
-    "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; "
-    "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; "
-    "form-action 'none'\r\n"
     "X-Content-Type-Options: nosniff\r\n"
     "Referrer-Policy: no-referrer\r\n"
     "Cache-Control: no-store\r\n"
     "Connection: close\r\n";
+
+/* The Host of the request being answered, when it is safe to echo into CSP. */
+static char req_host[256];
 
 static void send_all(int fd, const char *p, size_t len)
 {
@@ -523,22 +526,36 @@ static void send_all(int fd, const char *p, size_t len)
     }
 }
 
-static void respond(int fd, int code, const char *type, const char *extra,
-                    const void *body, size_t blen)
+static void respond_ex(int fd, int code, const char *type, const char *extra,
+                       const void *body, size_t blen, const char *style_src)
 {
+    char csp[768];
+    snprintf(csp, sizeof csp,
+             "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src %s; "
+             "connect-src 'self'%s%s%s%s; img-src 'self' data:; font-src 'self'; "
+             "frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\n",
+             style_src, req_host[0] ? " wss://" : "", req_host, req_host[0] ? " ws://" : "",
+             req_host);
     const char *reason = code == 200 ? "OK" : code == 400 ? "Bad Request" : code == 401 ? "Unauthorized"
                        : code == 403 ? "Forbidden" : code == 404 ? "Not Found"
-                       : code == 413 ? "Payload Too Large" : code == 429 ? "Too Many Requests" : "Error";
-    char head[1024];
+                       : code == 409 ? "Conflict" : code == 413 ? "Payload Too Large"
+                       : code == 429 ? "Too Many Requests" : code == 503 ? "Service Unavailable" : "Error";
+    char head[2048];
     int hl = snprintf(head, sizeof head,
-                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n%s%s\r\n",
-                      code, reason, type, blen, sec_headers, extra ? extra : "");
+                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n%s%s%s\r\n",
+                      code, reason, type, blen, csp, sec_headers, extra ? extra : "");
     int flags = fcntl(fd, F_GETFL);
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
     struct timeval tv = {5, 0};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
     send_all(fd, head, (size_t)hl);
     send_all(fd, body, blen);
+}
+
+static void respond(int fd, int code, const char *type, const char *extra,
+                    const void *body, size_t blen)
+{
+    respond_ex(fd, code, type, extra, body, blen, "'self'");
 }
 
 static void respond_json(int fd, int code, const char *extra, const char *json)
@@ -657,6 +674,138 @@ static struct token *find_token(const char *cookie)
     return NULL;
 }
 
+static struct conn *spawn_web(void)
+{
+    struct conn *c = NULL;
+    for (int i = 0; i < RT_MAX_CONNS && !c; i++)
+        if (conns[i].pid == 0)
+            c = &conns[i];
+    int sp[2];
+    if (!c || socketpair(AF_UNIX, SOCK_DGRAM, 0, sp) != 0)
+        return NULL;
+    cloexec(sp[0]);
+    cloexec(sp[1]);
+    pid_t pid = fork();
+    if (pid == 0) {
+        setsid();
+        dup2(fcntl(sp[1], F_DUPFD, 10), 4);
+        char *argv[] = {"rt", "--web", cfg->sbhome, cfg->state, NULL};
+        execv(cfg->self, argv);
+        _exit(127);
+    }
+    close(sp[1]);
+    if (pid < 0) {
+        close(sp[0]);
+        return NULL;
+    }
+    char m[PATH_MAX + 8];
+    int ml = snprintf(m, sizeof m, "C%c%s", cfg->sandbox ? '1' : '0', cfg->dir);
+    send(sp[0], m, (size_t)ml, 0);
+    fcntl(sp[0], F_SETFL, O_NONBLOCK);
+    memset(c, 0, sizeof *c);
+    c->pid = pid;
+    c->sup = sp[0];
+    c->start = time(NULL);
+    c->authed = 1;
+    c->web = 1;
+    arc4random_buf(c->sid, sizeof c->sid);
+    strlcpy(c->info, "browser terminal (starting)", sizeof c->info);
+    logmsg("browser terminal started");
+    return c;
+}
+
+static void ws_accept_key(const char *key, char out[29])
+{
+    static const char guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    char buf[128];
+    unsigned char d[CC_SHA1_DIGEST_LENGTH];
+    int n = snprintf(buf, sizeof buf, "%s%s", key, guid);
+    CC_SHA1(buf, (CC_LONG)n, d);
+    int o = 0;
+    for (int i = 0; i < 20; i += 3) {
+        unsigned v = (unsigned)d[i] << 16 | (i + 1 < 20 ? (unsigned)d[i + 1] << 8 : 0) |
+                     (i + 2 < 20 ? d[i + 2] : 0);
+        out[o++] = b64[v >> 18 & 63];
+        out[o++] = b64[v >> 12 & 63];
+        out[o++] = i + 1 < 20 ? b64[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < 20 ? b64[v & 63] : '=';
+    }
+    out[o] = '\0';
+}
+
+static int parse_sid(const char *query, unsigned char sid[16])
+{
+    const char *p = query ? strstr(query, "s=") : NULL;
+    if (!p || (p != query && p[-1] != '&'))
+        return -1;
+    p += 2;
+    for (int i = 0; i < 16; i++) {
+        int hi = hexval(p[2 * i]), lo = hi < 0 ? -1 : hexval(p[2 * i + 1]);
+        if (hi < 0 || lo < 0)
+            return -1;
+        sid[i] = (unsigned char)(hi * 16 + lo);
+    }
+    return 0;
+}
+
+/* Upgrades an authenticated request and hands the socket to that terminal's process. */
+static void websocket(int fd, const char *query, const char *origin, const char *upgrade,
+                      const char *key, const char *version)
+{
+    char want1[300], want2[300];
+    snprintf(want1, sizeof want1, "https://%s", req_host);
+    snprintf(want2, sizeof want2, "http://%s", req_host);
+    if (!req_host[0] || !origin || (strcmp(origin, want1) != 0 && strcmp(origin, want2) != 0)) {
+        respond_json(fd, 403, NULL, "{\"error\":\"Forbidden\"}");
+        return;
+    }
+    if (!upgrade || !strcasestr(upgrade, "websocket") || !key || strlen(key) > 64 || !version ||
+        strcmp(version, "13") != 0) {
+        respond_json(fd, 400, NULL, "{}");
+        return;
+    }
+    if (hib) {
+        respond_json(fd, 503, NULL, "{\"error\":\"Hibernating.\"}");
+        return;
+    }
+    unsigned char sid[16];
+    struct conn *c = NULL;
+    if (parse_sid(query, sid) == 0)
+        for (int i = 0; i < RT_MAX_CONNS && !c; i++)
+            if (conns[i].pid > 0 && conns[i].web && !conns[i].killing &&
+                timingsafe_bcmp(conns[i].sid, sid, sizeof sid) == 0)
+                c = &conns[i];
+    if (!c) {
+        respond_json(fd, 404, NULL, "{\"error\":\"No such terminal.\"}");
+        return;
+    }
+    char accept[29], head[256];
+    ws_accept_key(key, accept);
+    int hl = snprintf(head, sizeof head,
+                      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", accept);
+    int flags = fcntl(fd, F_GETFL);
+    fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    send_all(fd, head, (size_t)hl);
+
+    char data = 'A';
+    char cbuf[CMSG_SPACE(sizeof(int))];
+    memset(cbuf, 0, sizeof cbuf);
+    struct iovec iov = {&data, 1};
+    struct msghdr mh = {0};
+    mh.msg_iov = &iov;
+    mh.msg_iovlen = 1;
+    mh.msg_control = cbuf;
+    mh.msg_controllen = sizeof cbuf;
+    struct cmsghdr *cm = CMSG_FIRSTHDR(&mh);
+    cm->cmsg_level = SOL_SOCKET;
+    cm->cmsg_type = SCM_RIGHTS;
+    cm->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(cm), &fd, sizeof fd);
+    sendmsg(c->sup, &mh, 0);
+}
+
 static void web_handle(int fd, char *req, size_t len)
 {
     char *hend = strstr(req, "\r\n\r\n");
@@ -667,13 +816,31 @@ static void web_handle(int fd, char *req, size_t len)
     for (char *p = req; p < hend; p++)
         if (*p == '\r' || *p == '\n')
             *p = '\0';
-    const char *cookie = "", *xrt = NULL;
+    const char *cookie = "", *xrt = NULL, *host = NULL, *origin = NULL, *upgrade = NULL,
+               *wskey = NULL, *wsver = NULL;
     for (char *line = req; line < hend; line += strlen(line) + 1) {
-        if (strncasecmp(line, "Cookie:", 7) == 0)
-            cookie = line + 7;
-        else if (strncasecmp(line, "X-RT:", 5) == 0)
-            xrt = line + 5;
+        const char **dst = NULL;
+        size_t skip = 0;
+        static const struct { const char *name; size_t len; } h[] = {
+            {"Cookie:", 7}, {"X-RT:", 5}, {"Host:", 5}, {"Origin:", 7}, {"Upgrade:", 8},
+            {"Sec-WebSocket-Key:", 18}, {"Sec-WebSocket-Version:", 22}};
+        const char **slots[] = {&cookie, &xrt, &host, &origin, &upgrade, &wskey, &wsver};
+        for (size_t i = 0; i < sizeof h / sizeof h[0] && !dst; i++)
+            if (strncasecmp(line, h[i].name, h[i].len) == 0) {
+                dst = slots[i];
+                skip = h[i].len;
+            }
+        if (dst) {
+            const char *v = line + skip;
+            while (*v == ' ')
+                v++;
+            *dst = v;
+        }
     }
+    req_host[0] = '\0';
+    if (host && strlen(host) < sizeof req_host && strspn(host, "abcdefghijklmnopqrstuvwxyz"
+               "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:") == strlen(host))
+        strlcpy(req_host, host, sizeof req_host);
 
     char method[8], path[256];
     if (sscanf(req, "%7s %255s", method, path) != 2) {
@@ -682,9 +849,37 @@ static void web_handle(int fd, char *req, size_t len)
     }
     char *q = strchr(path, '?');
     if (q)
-        *q = '\0';
+        *q++ = '\0';
 
     int get = strcmp(method, "GET") == 0, post = strcmp(method, "POST") == 0;
+    struct token *tok = find_token(cookie);
+    static const struct {
+        const char *path, *type;
+        const unsigned char *body;
+        const unsigned *len;
+    } files[] = {
+        {"/term", "text/html; charset=utf-8", term_html, &term_html_len},
+        {"/term.js", "text/javascript; charset=utf-8", term_js, &term_js_len},
+        {"/term.css", "text/css; charset=utf-8", term_css, &term_css_len},
+        {"/xterm.js", "text/javascript; charset=utf-8", vendor_xterm_js, &vendor_xterm_js_len},
+        {"/xterm.css", "text/css; charset=utf-8", vendor_xterm_css, &vendor_xterm_css_len},
+        {"/addon-fit.js", "text/javascript; charset=utf-8", vendor_addon_fit_js,
+         &vendor_addon_fit_js_len},
+    };
+    for (size_t i = 0; get && i < sizeof files / sizeof files[0]; i++)
+        if (strcmp(path, files[i].path) == 0) {
+            /* xterm.js injects <style> elements; scripts stay restricted. */
+            respond_ex(fd, 200, files[i].type, NULL, files[i].body, *files[i].len,
+                       "'self' 'unsafe-inline'");
+            return;
+        }
+    if (get && strcmp(path, "/term/ws") == 0) {
+        if (!tok)
+            respond_json(fd, 401, NULL, "{\"error\":\"Log in first.\"}");
+        else
+            websocket(fd, q, origin, upgrade, wskey, wsver);
+        return;
+    }
     if (get && strcmp(path, "/") == 0) {
         respond(fd, 200, "text/html; charset=utf-8", NULL, panel_html, panel_html_len);
         return;
@@ -743,7 +938,6 @@ static void web_handle(int fd, char *req, size_t len)
         return;
     }
 
-    struct token *tok = find_token(cookie);
     if (!tok) {
         respond_json(fd, 401, NULL, "{\"error\":\"Log in first.\"}");
         return;
@@ -756,6 +950,23 @@ static void web_handle(int fd, char *req, size_t len)
     }
     if (!post) {
         respond_json(fd, 404, NULL, "{\"error\":\"Not found\"}");
+        return;
+    }
+    if (strcmp(path, "/api/term") == 0) {
+        if (hib) {
+            respond_json(fd, 409, NULL, "{\"error\":\"Hibernating. Wake rt from the panel first.\"}");
+            return;
+        }
+        struct conn *c = spawn_web();
+        if (!c) {
+            respond_json(fd, 503, NULL, "{\"error\":\"Could not start a terminal.\"}");
+            return;
+        }
+        char hex[33];
+        for (int i = 0; i < 16; i++)
+            snprintf(hex + 2 * i, 3, "%02x", c->sid[i]);
+        snprintf(out, sizeof out, "{\"sid\":\"%s\"}", hex);
+        respond_json(fd, 200, NULL, out);
         return;
     }
     if (strcmp(path, "/api/logout") == 0) {
