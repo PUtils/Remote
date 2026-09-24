@@ -24,6 +24,7 @@ rt -n               # no relay or tunnel, 127.0.0.1 only
 rt -c               # send a cleanup script to the client on disconnect
 rt -w ~/logs        # also append the log to ~/logs/rt.log
 rt -b               # bidirectional: reach the joining client back with `peer`
+rt -p               # stay reachable with the lid closed (sudo pmset, undone on exit)
 ```
 
 With `-b`, join using a reverse forward and you can drive both machines from one
@@ -56,4 +57,4 @@ The relay name is 8 random characters without look-alikes (no 0/o, 1/l/i), creat
 - **Sandbox (`-l`).** macOS Seatbelt via `sandbox-exec`. The directory is read/write, installed tools are runnable, and the rest of home is unreadable. Nothing else is writable except temp dirs. The keychain, `open`, Apple Events and launchd jobs are blocked. Sessions get `HOME=~/.local/state/rt/home`, so Claude Code logs in once there, or gets a token via `ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN`.
 - **Panel (`-h`).** A phone page: hibernate or wake, change the directory, close sessions. Hibernating closes every session and refuses new ones.
 - **Browser terminal (`-h`).** xterm.js over a WebSocket, with an Esc/Tab/Ctrl/arrow key bar on touch screens. Each terminal is its own `rt --web` process that the supervisor hands authenticated sockets to. The shell survives a dropped connection (phone locked, app switched) for 15 minutes, and the page reattaches and replays recent output.
-- **Sleep.** `caffeinate -is` keeps the Mac awake, including with the screen locked. Lid-closed needs `sudo pmset -a disablesleep 1`.
+- **Sleep.** `caffeinate -is` keeps the Mac awake, including with the screen locked. Lid-closed sleep needs `-p`, which runs `sudo pmset -a disablesleep 1` at startup (one sudo prompt) and restores it on exit.

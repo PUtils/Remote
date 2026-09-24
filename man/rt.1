@@ -14,6 +14,7 @@
 .Op Fl c
 .Op Fl w Op Ar dir
 .Op Fl b
+.Op Fl p
 .Nm remote
 .Op Ar same options
 .Sh DESCRIPTION
@@ -124,6 +125,24 @@ trusts, or a password is asked.
 Only loopback forwards are accepted, and only with
 .Fl b ;
 without it all forwarding is refused, as usual.
+.It Fl p
+Persist with the lid closed.
+.Nm
+always runs
+.Xr caffeinate 8
+so the Mac stays awake while it runs, but macOS still sleeps when the lid
+is shut.
+.Fl p
+also runs
+.Li sudo pmset -a disablesleep 1
+at startup, which needs the sudo password once, and undoes it
+.Pq Li disablesleep 0
+when
+.Nm
+exits normally.
+If lid-closed sleep was already disabled,
+.Nm
+leaves it untouched.
 .El
 .Pp
 Without
@@ -218,9 +237,13 @@ runs
 .Xr caffeinate 8
 so the Mac stays awake while it runs, including with the screen locked.
 With the lid closed macOS still sleeps unless
+.Fl p
+is given, which runs
 .Li sudo pmset -a disablesleep 1
-has been run
-.Pq Li 0 No undoes it ;
+for you and undoes it on exit
+.Pq Li 0 No undoes it by hand ;
+without
+.Fl p ,
 .Nm
 says so at startup.
 .Sh FILES

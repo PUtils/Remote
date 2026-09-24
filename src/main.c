@@ -23,7 +23,7 @@ static const char *prog = "rt";
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]] [-b]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]] [-b] [-p]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
@@ -32,6 +32,7 @@ static void usage(FILE *f)
             "  -w [dir]   also append the log to dir/rt.log (default: current directory)\n"
             "  -b         bidirectional: a client that joins with `ssh -R` can be reached\n"
             "             back from the session with the `peer` command\n"
+            "  -p         persist with the lid closed (sudo pmset disablesleep; undone on exit)\n"
             "rt and remote are the same command. See man rt.\n",
             prog);
 }
@@ -176,7 +177,21 @@ static int read_password(struct pwhash *h)
     return rc;
 }
 
-static void keep_awake(void)
+static int sleep_disabled(void)
+{
+    FILE *f = popen("/usr/bin/pmset -g", "r");
+    char line[256];
+    int disabled = 0;
+    while (f && fgets(line, sizeof line, f))
+        if (strstr(line, "SleepDisabled"))
+            disabled = atoi(line + strcspn(line, "0123456789")) == 1;
+    if (f)
+        pclose(f);
+    return disabled;
+}
+
+/* Returns 1 if rt itself disabled lid-closed sleep and should restore it. */
+static int keep_awake(int persist)
 {
     char pid[16];
     snprintf(pid, sizeof pid, "%d", (int)getpid());
@@ -191,17 +206,33 @@ static void keep_awake(void)
         _exit(127);
     }
 
-    FILE *f = popen("/usr/bin/pmset -g", "r");
-    char line[256];
-    int disabled = 0;
-    while (f && fgets(line, sizeof line, f))
-        if (strstr(line, "SleepDisabled"))
-            disabled = atoi(line + strcspn(line, "0123456789")) == 1;
-    if (f)
-        pclose(f);
-    if (!disabled)
-        fprintf(stderr, "rt: the Mac will still sleep with the lid closed; "
-                        "`sudo pmset -a disablesleep 1` prevents that (`0` undoes it)\n");
+    if (!persist) {
+        if (!sleep_disabled())
+            fprintf(stderr, "rt: the Mac will still sleep with the lid closed; "
+                            "start with `rt -p` (or `sudo pmset -a disablesleep 1`) to prevent it\n");
+        return 0;
+    }
+    if (sleep_disabled()) {
+        logmsg("lid-closed sleep already disabled; leaving it as is");
+        return 0;
+    }
+    fprintf(stderr, "rt: -p keeps the Mac awake with the lid closed and needs sudo once\n");
+    if (system("sudo /usr/bin/pmset -a disablesleep 1") == 0) {
+        logmsg("lid-closed sleep disabled; rt restores it on exit");
+        return 1;
+    }
+    fprintf(stderr, "rt: could not disable lid-closed sleep; continuing without it\n");
+    return 0;
+}
+
+/* Undo -p's pmset change on the way out, without a second password prompt. */
+static void restore_sleep(void)
+{
+    if (system("sudo -n /usr/bin/pmset -a disablesleep 0") == 0)
+        logmsg("lid-closed sleep restored");
+    else
+        fprintf(stderr, "rt: undo lid-closed sleep yourself with "
+                        "`sudo pmset -a disablesleep 0`\n");
 }
 
 int main(int argc, char **argv)
@@ -238,6 +269,7 @@ int main(int argc, char **argv)
             case 'n': cfg.tunnel = 0; break;
             case 'c': cfg.cleanup = 1; break;
             case 'b': cfg.bidi = 1; break;
+            case 'p': cfg.persist = 1; break;
             case 'w':
                 cfg.logging = 1;
                 if (p[1] == '\0' && i + 1 < argc && argv[i + 1][0] != '-')
@@ -336,7 +368,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "rt: cannot write %s/rt.log\n", cfg.logdir);
         return 1;
     }
-    keep_awake();
+    int restore = keep_awake(cfg.persist);
     logmsg("host key %s", fp);
     logmsg("directory %s (%s)", cfg.dir, cfg.sandbox ? "sandboxed" : "full access");
     logmsg("ssh on 127.0.0.1:%d%s", ssh_port, cfg.keys[0] ? " (key + password)" : "");
@@ -344,5 +376,8 @@ int main(int argc, char **argv)
         logmsg("panel on http://127.0.0.1:%d", http_port);
     else
         logmsg("phone panel is off; start with `rt -h` to hibernate/wake from your phone");
-    return supervise(&cfg, &pw, ssh_fd, ssh_port, http_fd, http_port);
+    int rc = supervise(&cfg, &pw, ssh_fd, ssh_port, http_fd, http_port);
+    if (restore)
+        restore_sleep();
+    return rc;
 }

@@ -17,6 +17,7 @@ struct config {
     int cloudflared;
     int cleanup;
     int bidi;
+    int persist;
     int logging;
     char logdir[PATH_MAX];
     char relay[32];
