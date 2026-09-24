@@ -44,6 +44,7 @@ void web_main(char **argv) __attribute__((noreturn));
 struct spawnctx {
     char dir[PATH_MAX];
     int sandboxed;
+    int bidi;
     int peer_port;
     const char *sbhome, *statedir;
 };

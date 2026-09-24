@@ -532,6 +532,13 @@ static void announce(struct tunnel *t, int ok)
             "        ControlPath ~/.ssh/cm-%%C\n"
             "        ControlPersist 4h\n\n",
             join_plain, cfg->fingerprint, cfg->relay, cfg->relay);
+    if (cfg->bidi)
+        fprintf(stderr,
+                "    Bidirectional (-b): join like this instead, then run `peer <cmd>`\n"
+                "    inside the session to run <cmd> back on the machine you came from:\n\n"
+                "      ssh -R 127.0.0.1:0:127.0.0.1:22 -J %s@" RELAY_HOST " " RELAY_TARGET "\n\n"
+                "    Set RT_PEER_USER to your login on that machine if it differs.\n\n",
+                cfg->relay);
 }
 
 static void tunnel_read(struct tunnel *t)

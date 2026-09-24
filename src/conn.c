@@ -685,6 +685,7 @@ void conn_main(char **argv)
     spawnctx.statedir = argv[5];
     cleanup_flag = argv[6] ? atoi(argv[6]) : 0;
     bidi_flag = argv[7] ? atoi(argv[7]) : 0;
+    spawnctx.bidi = bidi_flag;
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);

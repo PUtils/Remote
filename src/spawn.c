@@ -26,7 +26,7 @@ static char **build_env(char *const *cenv, int ncenv, const char *shell, const c
     int n = 0;
     for (int i = 0; i < ncenv; i++)
         e[n++] = strdup(cenv[i]);
-    if (spawnctx.peer_port > 0)
+    if (spawnctx.bidi)
         asprintf(&e[n++], "PATH=%s/bin:%s", spawnctx.statedir,
                  path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
     else
