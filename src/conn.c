@@ -202,6 +202,7 @@ static void on_close(ssh_session s, ssh_channel ch, void *ud)
     if (c->cleanup) {
         const char *script = cleanup_script();
         ssh_channel_write(ch, (const unsigned char *)script, strlen(script));
+        logmsg("sent cleanup script to client on disconnect");
     }
     c->client_closed = 1;
     if (c->pid > 0 && !c->exited)
