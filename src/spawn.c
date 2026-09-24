@@ -33,6 +33,8 @@ static char **build_env(char *const *cenv, int ncenv, const char *shell, const c
         asprintf(&e[n++], "PATH=%s", path ? path : "/usr/bin:/bin:/usr/sbin:/sbin");
     if (spawnctx.peer_port > 0)
         asprintf(&e[n++], "RT_PEER_PORT=%d", spawnctx.peer_port);
+    if (spawnctx.bidi && spawnctx.peer_user && spawnctx.peer_user[0])
+        asprintf(&e[n++], "RT_PEER_USER=%s", spawnctx.peer_user);
     asprintf(&e[n++], "HOME=%s", home);
     asprintf(&e[n++], "USER=%s", pw->pw_name);
     asprintf(&e[n++], "LOGNAME=%s", pw->pw_name);

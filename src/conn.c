@@ -124,9 +124,11 @@ static void tell_pid(char kind, pid_t pid)
     tell(kind, b);
 }
 
+static char login_user[128];
+
 static int auth_password(ssh_session s, const char *user, const char *pw, void *ud)
 {
-    (void)s; (void)user; (void)ud;
+    (void)s; (void)ud;
     if (nkeys > 0 && !key_ok)
         return SSH_AUTH_DENIED;
     size_t len = strlen(pw);
@@ -141,6 +143,10 @@ static int auth_password(ssh_session s, const char *user, const char *pw, void *
     if (n >= 3 && r[0] == 'O') {
         spawnctx.sandboxed = r[1] == '1';
         strlcpy(spawnctx.dir, r + 2, sizeof spawnctx.dir);
+        if (user && user[0]) {
+            strlcpy(login_user, user, sizeof login_user);
+            spawnctx.peer_user = login_user;
+        }
         authed = 1;
         return SSH_AUTH_SUCCESS;
     }

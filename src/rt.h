@@ -47,7 +47,7 @@ struct spawnctx {
     int sandboxed;
     int bidi;
     int peer_port;
-    const char *sbhome, *statedir;
+    const char *sbhome, *statedir, *peer_user;
 };
 extern struct spawnctx spawnctx;
 pid_t spawn_command(const char *cmd, int slave, const int pipes[3], char *const *cenv, int ncenv,
