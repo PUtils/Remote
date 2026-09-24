@@ -2,7 +2,8 @@
 .Dt RT 1
 .Os
 .Sh NAME
-.Nm rt
+.Nm rt ,
+.Nm remote
 .Nd reach this Mac's terminal remotely over SSH
 .Sh SYNOPSIS
 .Nm
@@ -10,7 +11,13 @@
 .Op Fl h
 .Op Fl k Ar keyfile
 .Op Fl n
+.Nm remote
+.Op Ar same options
 .Sh DESCRIPTION
+.Nm
+and
+.Nm remote
+are the same command.
 .Nm
 runs a password-protected SSH server for the current user and makes it
 reachable from anywhere through the public SSH relay ssh-j.com and a
@@ -158,6 +165,10 @@ Its fingerprint is printed at startup; compare it the first time you connect.
 Home directory for sandboxed sessions.
 .It Pa ~/.local/state/rt/relay_name
 The relay name; delete it to get a new join command.
+Every
+.Nm
+on the Mac uses it, so only the first one running gets the relay route;
+the others say so and retry every 30 seconds.
 .El
 .Sh SEE ALSO
 .Xr cloudflared 1 ,

@@ -18,15 +18,18 @@
 
 #define MIN_PASSWORD 12
 
+static const char *prog = "rt";
+
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: rt [-l [dir]] [-h] [-k keyfile] [-n]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
             "  -n         no relay or Cloudflare tunnel; listen on localhost only\n"
-            "See man rt.\n");
+            "rt and remote are the same command. See man rt.\n",
+            prog);
 }
 
 static int mkdirs(const char *path)
@@ -171,6 +174,9 @@ int main(int argc, char **argv)
         conn_main(argv);
     if (argc == 4 && strcmp(argv[1], "--web") == 0)
         web_main(argv);
+
+    const char *base = strrchr(argv[0], '/');
+    prog = strcmp(base ? base + 1 : argv[0], "remote") == 0 ? "remote" : "rt";
 
     static struct config cfg;
     const char *dirarg = NULL, *keyarg = NULL;

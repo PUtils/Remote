@@ -8,10 +8,12 @@ Needs Homebrew `libssh`; `cloudflared` is optional (the phone panel and the port
 
 ```sh
 brew install libssh cloudflared
-make install        # installs rt and its man page under $(brew --prefix)
+make install        # installs rt, its alias remote, and the man pages under $(brew --prefix)
 ```
 
 ## Use
+
+`remote` is the same command as `rt`, with the same options.
 
 ```sh
 rt                  # full access, sessions start in the current directory

@@ -1,3 +1,16 @@
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-regular.woff") format("woff");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-bold.woff") format("woff");
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   --bg: #141413;
   --bar: #1f1f1d;

@@ -4,8 +4,10 @@ const $ = (s) => document.querySelector(s);
 const statusEl = $("#status");
 const touch = matchMedia("(pointer: coarse)").matches;
 
+const FALLBACK_FONT = "ui-monospace, Menlo, monospace";
+const NERD_FONT = '"MesloLGS NF", ' + FALLBACK_FONT;
 const term = new Terminal({
-  fontFamily: "ui-monospace, Menlo, monospace",
+  fontFamily: FALLBACK_FONT,
   fontSize: touch ? 12 : 14,
   cursorBlink: true,
   scrollback: 5000,
@@ -199,6 +201,15 @@ document.addEventListener("visibilitychange", () => {
     connect();
   }
 });
+
+// xterm measures glyphs once, so switch to the Nerd Font only after it has loaded.
+Promise.all([
+  document.fonts.load('12px "MesloLGS NF"'),
+  document.fonts.load('bold 12px "MesloLGS NF"'),
+]).then(() => {
+  term.options.fontFamily = NERD_FONT;
+  layout();
+}).catch(() => {});
 
 layout();
 connect();

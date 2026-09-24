@@ -59,6 +59,7 @@ struct tunnel {
     int fd;
     size_t len;
     time_t restart_at;
+    int fails, warned;
     char buf[4096];
     char url[256];
 };
@@ -325,6 +326,7 @@ static void tunnel_start(struct tunnel *t)
     t->pid = pid;
     t->fd = p[0];
     t->len = 0;
+    t->buf[0] = '\0';
     t->url[0] = '\0';
     if (t->kind == T_RELAY) {
         /* The relay address is fixed, so there is nothing to wait for in the output. */
@@ -457,6 +459,8 @@ static void announce(struct tunnel *t, int ok)
         logmsg("cloudflare route %s, for computers with cloudflared:\n\n    %s\n", state, join_cf);
         return;
     }
+    if (ok)
+        t->fails = t->warned = 0;
     snprintf(join_plain, sizeof join_plain, "ssh -J %s@" RELAY_HOST " %s", cfg->relay, cfg->relay);
     logmsg("%s. Join from any computer with plain ssh:", state);
     fprintf(stderr,
@@ -483,7 +487,8 @@ static void tunnel_read(struct tunnel *t)
         }
         return;
     }
-    if (t->url[0]) {
+    /* Keep the relay's own messages so a failure can be explained. */
+    if (t->url[0] && t->kind != T_RELAY) {
         t->len = 0;
         return;
     }
@@ -509,7 +514,6 @@ static void tunnel_read(struct tunnel *t)
 static const char sec_headers[] =
     "X-Content-Type-Options: nosniff\r\n"
     "Referrer-Policy: no-referrer\r\n"
-    "Cache-Control: no-store\r\n"
     "Connection: close\r\n";
 
 /* The Host of the request being answered, when it is safe to echo into CSP. */
@@ -542,8 +546,11 @@ static void respond_ex(int fd, int code, const char *type, const char *extra,
                        : code == 429 ? "Too Many Requests" : code == 503 ? "Service Unavailable" : "Error";
     char head[2048];
     int hl = snprintf(head, sizeof head,
-                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n%s%s%s\r\n",
-                      code, reason, type, blen, csp, sec_headers, extra ? extra : "");
+                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n%s%s%s%s\r\n",
+                      code, reason, type, blen, csp, sec_headers,
+                      strncmp(type, "font/", 5) == 0 ? "Cache-Control: public, max-age=604800\r\n"
+                                                     : "Cache-Control: no-store\r\n",
+                      extra ? extra : "");
     int flags = fcntl(fd, F_GETFL);
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
     struct timeval tv = {5, 0};
@@ -865,6 +872,10 @@ static void web_handle(int fd, char *req, size_t len)
         {"/xterm.css", "text/css; charset=utf-8", vendor_xterm_css, &vendor_xterm_css_len},
         {"/addon-fit.js", "text/javascript; charset=utf-8", vendor_addon_fit_js,
          &vendor_addon_fit_js_len},
+        {"/fonts/meslo-regular.woff", "font/woff", vendor_fonts_MesloLGS_NF_Regular_woff,
+         &vendor_fonts_MesloLGS_NF_Regular_woff_len},
+        {"/fonts/meslo-bold.woff", "font/woff", vendor_fonts_MesloLGS_NF_Bold_woff,
+         &vendor_fonts_MesloLGS_NF_Bold_woff_len},
     };
     for (size_t i = 0; get && i < sizeof files / sizeof files[0]; i++)
         if (strcmp(path, files[i].path) == 0) {
@@ -1106,14 +1117,27 @@ static void reap(void)
                 killpg(t->probe, SIGKILL);
                 t->probe = 0;
             }
-            if (!stopping) {
-                if (t->kind == T_RELAY)
+            if (stopping)
+                continue;
+            for (int k = 0; k < 16 && t->fd >= 0; k++)
+                tunnel_read(t);
+            int delay = 5;
+            t->fails++;
+            if (t->kind == T_RELAY && strstr(t->buf, "forwarding failed")) {
+                if (!t->warned)
+                    logmsg("relay name %s is already in use, probably by another rt on this Mac; "
+                           "retrying every 30 s", cfg->relay);
+                t->warned = 1;
+                delay = 30;
+            } else if (t->kind == T_RELAY) {
+                if (t->fails == 1)
                     logmsg("relay connection dropped; reconnecting (same address)");
-                else
-                    logmsg("%s tunnel stopped; restarting (the address will change)",
-                           t->kind == T_PANEL ? "panel" : "cloudflare");
-                t->restart_at = time(NULL) + 5;
+                delay = t->fails < 5 ? 5 << (t->fails - 1) : 60;
+            } else {
+                logmsg("%s tunnel stopped; restarting (the address will change)",
+                       t->kind == T_PANEL ? "panel" : "cloudflare");
             }
+            t->restart_at = time(NULL) + delay;
         }
     }
 }

@@ -9,7 +9,8 @@ LDLIBS += $(shell pkg-config --libs libssh)
 SRC := src/main.c src/supervisor.c src/conn.c src/auth.c src/sandbox.c src/spawn.c src/web.c
 OBJ := $(SRC:src/%.c=build/%.o)
 WEB := web/panel.html web/panel.css web/panel.js web/term.html web/term.css web/term.js \
-       web/vendor/xterm.js web/vendor/xterm.css web/vendor/addon-fit.js
+       web/vendor/xterm.js web/vendor/xterm.css web/vendor/addon-fit.js \
+       web/vendor/fonts/MesloLGS-NF-Regular.woff web/vendor/fonts/MesloLGS-NF-Bold.woff
 
 bin/rt: $(OBJ) | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
@@ -29,9 +30,12 @@ install: bin/rt
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/man/man1
 	install -m 755 bin/rt $(DESTDIR)$(PREFIX)/bin/rt
 	install -m 644 man/rt.1 $(DESTDIR)$(PREFIX)/share/man/man1/rt.1
+	ln -sf rt $(DESTDIR)$(PREFIX)/bin/remote
+	printf '.so man1/rt.1\n' > $(DESTDIR)$(PREFIX)/share/man/man1/remote.1
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/rt $(DESTDIR)$(PREFIX)/share/man/man1/rt.1
+	rm -f $(DESTDIR)$(PREFIX)/bin/rt $(DESTDIR)$(PREFIX)/bin/remote \
+	      $(DESTDIR)$(PREFIX)/share/man/man1/rt.1 $(DESTDIR)$(PREFIX)/share/man/man1/remote.1
 
 clean:
 	rm -rf bin build
