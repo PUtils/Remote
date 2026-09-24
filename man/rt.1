@@ -83,11 +83,19 @@ The relay route needs nothing but
 .Xr ssh 1
 on the other computer:
 .Bd -literal -offset indent
-ssh -J NAME@ssh-j.com NAME
+ssh -J NAME@ssh-j.com mac
 .Ed
 .Pp
 .Ar NAME
-is random, created on the first run and kept, so the command stays the same.
+is
+.Ql rt-
+and 8 random letters and digits without look-alikes, created on the first
+run and kept, so the command stays the same.
+If ssh reports
+.Dq administratively prohibited ,
+the name was mistyped or
+.Nm
+is not running.
 The Mac keeps an outgoing SSH connection to ssh-j.com open and reconnects if
 it drops.
 The relay only forwards the session, which stays encrypted between the two

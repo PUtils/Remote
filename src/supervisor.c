@@ -268,6 +268,7 @@ static void hibernate(int on, const char *via)
 /* ---- tunnels ---- */
 
 #define RELAY_HOST "ssh-j.com"
+#define RELAY_TARGET "mac"
 
 static void relay_opts(char **a, int *n, char *kh)
 {
@@ -303,7 +304,7 @@ static void tunnel_start(struct tunnel *t)
             char *a[40], fwd[128], dest[128];
             int n = 0;
             relay_opts(a, &n, cfg->relay_kh);
-            snprintf(fwd, sizeof fwd, "%s:22:%s", cfg->relay, t->url_arg);
+            snprintf(fwd, sizeof fwd, RELAY_TARGET ":22:%s", t->url_arg);
             snprintf(dest, sizeof dest, "%s@" RELAY_HOST, cfg->relay);
             a[n++] = "-N";
             a[n++] = "-R";
@@ -399,7 +400,7 @@ static int probe(const struct tunnel *t)
         static char target[128], dest[128];
         int n = 0;
         relay_opts(check, &n, cfg->relay_kh);
-        snprintf(target, sizeof target, "%s:22", cfg->relay);
+        snprintf(target, sizeof target, RELAY_TARGET ":22");
         snprintf(dest, sizeof dest, "%s@" RELAY_HOST, cfg->relay);
         check[n++] = "-W";
         check[n++] = target;
@@ -461,15 +462,16 @@ static void announce(struct tunnel *t, int ok)
     }
     if (ok)
         t->fails = t->warned = 0;
-    snprintf(join_plain, sizeof join_plain, "ssh -J %s@" RELAY_HOST " %s", cfg->relay, cfg->relay);
+    snprintf(join_plain, sizeof join_plain, "ssh -J %s@" RELAY_HOST " " RELAY_TARGET, cfg->relay);
     logmsg("%s. Join from any computer with plain ssh:", state);
     fprintf(stderr,
             "\n    %s\n\n"
             "    The first time, ssh asks to trust two keys: " RELAY_HOST "'s (the public relay)\n"
-            "    and this Mac's, which must be %s\n\n"
+            "    and this Mac's, which must be %s\n"
+            "    \"administratively prohibited\" means the name %s was mistyped or rt is not running.\n\n"
             "    To let agents reuse one login, put this in ~/.ssh/config and run `ssh mac`:\n"
             "      Host mac\n"
-            "        HostName %s\n"
+            "        HostName " RELAY_TARGET "\n"
             "        ProxyJump %s@" RELAY_HOST "\n"
             "        ControlMaster auto\n"
             "        ControlPath ~/.ssh/cm-%%C\n"

@@ -92,7 +92,12 @@ static int host_key(const char *path, char *fp, size_t cap)
     return ok ? 0 : -1;
 }
 
-/* A random name, kept across runs so the join command stays the same. */
+#define RELAY_ALPHABET "abcdefghjkmnpqrstuvwxyz23456789"
+
+/*
+ * A random name, kept across runs so the join command stays the same. It is
+ * short and avoids look-alike characters because people type it by hand.
+ */
 static int relay_name(const char *state, char *out, size_t cap)
 {
     char path[PATH_MAX];
@@ -102,14 +107,14 @@ static int relay_name(const char *state, char *out, size_t cap)
         int ok = fgets(out, (int)cap, f) != NULL;
         fclose(f);
         out[strcspn(out, "\r\n")] = '\0';
-        if (ok && strncmp(out, "rt-", 3) == 0 && strlen(out) == 19)
+        if (ok && strlen(out) == 11 && strncmp(out, "rt-", 3) == 0 &&
+            strspn(out + 3, RELAY_ALPHABET) == 8)
             return 0;
     }
-    unsigned char r[8];
-    arc4random_buf(r, sizeof r);
     snprintf(out, cap, "rt-");
     for (int i = 0; i < 8; i++)
-        snprintf(out + 3 + 2 * i, cap - 3 - 2 * i, "%02x", r[i]);
+        out[3 + i] = RELAY_ALPHABET[arc4random_uniform(sizeof RELAY_ALPHABET - 1)];
+    out[11] = '\0';
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0)
         return -1;

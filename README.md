@@ -26,11 +26,11 @@ rt -n               # no relay or tunnel, 127.0.0.1 only
 `rt` asks for a password (12+ characters), checks each route end to end, then prints how to join:
 
 ```sh
-ssh -J rt-XXXXXXXXXXXXXXXX@ssh-j.com rt-XXXXXXXXXXXXXXXX     # any computer with ssh
+ssh -J rt-XXXXXXXX@ssh-j.com mac                           # any computer with ssh
 ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" HOST   # if port 22 is blocked
 ```
 
-The relay name is random, created once and kept, so the first command never changes. `rt` also prints an `~/.ssh/config` entry with connection sharing, so agents can reuse a session you logged into once. The phone panel shows both commands.
+The relay name is 8 random characters without look-alikes (no 0/o, 1/l/i), created once and kept, so the first command never changes. "administratively prohibited" from ssh means the name was mistyped or `rt` isn't running. `rt` also prints an `~/.ssh/config` entry with connection sharing, so agents can reuse a session you logged into once. The phone panel shows both commands.
 
 ## Design
 
