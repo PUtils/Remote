@@ -23,12 +23,13 @@ static const char *prog = "rt";
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c] [-w [dir]]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
             "  -n         no relay or Cloudflare tunnel; listen on localhost only\n"
             "  -c         clean up shell history and SSH config after disconnect\n"
+            "  -w [dir]   also append the log to dir/rt.log (default: current directory)\n"
             "rt and remote are the same command. See man rt.\n",
             prog);
 }
@@ -176,7 +177,7 @@ static void keep_awake(void)
 
 int main(int argc, char **argv)
 {
-    if (argc == 6 && strcmp(argv[1], "--conn") == 0)
+    if (argc == 7 && strcmp(argv[1], "--conn") == 0)
         conn_main(argv);
     if (argc == 4 && strcmp(argv[1], "--web") == 0)
         web_main(argv);
@@ -185,7 +186,7 @@ int main(int argc, char **argv)
     prog = strcmp(base ? base + 1 : argv[0], "remote") == 0 ? "remote" : "rt";
 
     static struct config cfg;
-    const char *dirarg = NULL, *keyarg = NULL;
+    const char *dirarg = NULL, *keyarg = NULL, *logarg = NULL;
     cfg.tunnel = 1;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -207,6 +208,11 @@ int main(int argc, char **argv)
             case 'h': cfg.panel = 1; break;
             case 'n': cfg.tunnel = 0; break;
             case 'c': cfg.cleanup = 1; break;
+            case 'w':
+                cfg.logging = 1;
+                if (p[1] == '\0' && i + 1 < argc && argv[i + 1][0] != '-')
+                    logarg = argv[++i];
+                break;
             case 'k':
                 if (p[1] != '\0' || i + 1 >= argc) {
                     usage(stderr);
@@ -235,6 +241,16 @@ int main(int argc, char **argv)
     if (stat(cfg.dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
         fprintf(stderr, "rt: %s is not a directory\n", cfg.dir);
         return 1;
+    }
+    if (cfg.logging) {
+        if (!realpath(logarg ? logarg : ".", cfg.logdir)) {
+            fprintf(stderr, "rt: %s: %s\n", logarg ? logarg : ".", strerror(errno));
+            return 1;
+        }
+        if (stat(cfg.logdir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "rt: %s is not a directory\n", cfg.logdir);
+            return 1;
+        }
     }
     if (keyarg) {
         if (!realpath(keyarg, cfg.keys) || count_keys(cfg.keys) <= 0) {
@@ -282,6 +298,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (cfg.logging && log_open(cfg.logdir) != 0) {
+        fprintf(stderr, "rt: cannot write %s/rt.log\n", cfg.logdir);
+        return 1;
+    }
     keep_awake();
     logmsg("host key %s", fp);
     logmsg("directory %s (%s)", cfg.dir, cfg.sandbox ? "sandboxed" : "full access");

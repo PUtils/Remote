@@ -16,6 +16,8 @@ struct config {
     int tunnel;
     int cloudflared;
     int cleanup;
+    int logging;
+    char logdir[PATH_MAX];
     char relay[32];
     char relay_kh[PATH_MAX];
     char fingerprint[128];
@@ -56,5 +58,6 @@ int supervise(struct config *cfg, struct pwhash *pw, int ssh_fd, int ssh_port,
 const char *cleanup_script(void);
 
 void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+int log_open(const char *dir);
 
 #endif

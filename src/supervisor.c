@@ -108,17 +108,40 @@ static time_t next_try, locked_until;
 static int sigp[2];
 static volatile sig_atomic_t stopping;
 
+static FILE *logfile;
+
+int log_open(const char *dir)
+{
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/rt.log", dir);
+    logfile = fopen(path, "a");
+    if (!logfile)
+        return -1;
+    setvbuf(logfile, NULL, _IOLBF, 0);
+    return 0;
+}
+
 void logmsg(const char *fmt, ...)
 {
-    char ts[16];
+    char stamp[32];
     time_t now = time(NULL);
-    strftime(ts, sizeof ts, "%H:%M:%S", localtime(&now));
-    fprintf(stderr, "rt %s  ", ts);
+    struct tm *tm = localtime(&now);
+    strftime(stamp, sizeof stamp, "%H:%M:%S", tm);
+    fprintf(stderr, "rt %s  ", stamp);
     va_list ap;
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
+
+    if (logfile) {
+        strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", tm);
+        fprintf(logfile, "rt %s  ", stamp);
+        va_start(ap, fmt);
+        vfprintf(logfile, fmt, ap);
+        va_end(ap);
+        fputc('\n', logfile);
+    }
 }
 
 static void cloexec(int fd)
@@ -1128,6 +1151,10 @@ static void reap(void)
             for (int g = 0; g < c->ngroups; g++) {
                 killpg(c->groups[g], SIGHUP);
                 killpg(c->groups[g], SIGKILL);
+            }
+            if (c->authed) {
+                long secs = (long)(time(NULL) - c->start);
+                logmsg("%s logout (%ldm%02lds)", c->web ? "panel" : "ssh", secs / 60, secs % 60);
             }
             close(c->sup);
             memset(c, 0, sizeof *c);

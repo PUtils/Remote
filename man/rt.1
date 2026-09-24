@@ -11,6 +11,8 @@
 .Op Fl h
 .Op Fl k Ar keyfile
 .Op Fl n
+.Op Fl c
+.Op Fl w Op Ar dir
 .Nm remote
 .Op Ar same options
 .Sh DESCRIPTION
@@ -70,6 +72,27 @@ format without options).
 The key is checked first, then the password.
 .It Fl n
 Do not connect to the relay or start a tunnel; listen on 127.0.0.1 only.
+.It Fl c
+When a session disconnects, send the client a script that removes traces of
+the tunnel: the
+.Pa known_hosts
+entries for ssh-j.com and the relay name, the connection-sharing sockets, and
+the matching shell-history lines.
+Both a POSIX version (Linux, macOS, WSL) and a Windows PowerShell version are
+sent, so the client can run whichever fits.
+.It Fl w Op Ar dir
+Also append every log line to
+.Pa dir/rt.log ,
+or
+.Pa rt.log
+in the current directory if none is given.
+The file holds the same messages
+.Nm
+prints to its terminal, with a full date on each line, and is opened in append
+mode so earlier runs are kept.
+This is independent of
+.Fl l ;
+each option takes its own directory.
 .El
 .Pp
 Without
@@ -148,8 +171,13 @@ After three wrong passwords in a row, from SSH or the panel together, each
 further attempt must wait 1, 2, 4 ... up to 60 seconds; after ten,
 .Nm
 refuses all logins for 15 minutes.
-Every login and wrong password is logged to the terminal running
-.Nm .
+Every login, logout and wrong password is logged to the terminal running
+.Nm ,
+and to
+.Pa rt.log
+as well when
+.Fl w
+is given.
 .Pp
 The panel's login cookie is HttpOnly, Secure and SameSite=Strict, and every
 API request must carry a custom header, so other sites cannot act on it.

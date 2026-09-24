@@ -21,6 +21,8 @@ rt -l               # sandbox sessions to the current directory
 rt -l ~/project -h  # sandbox to ~/project and publish the phone panel
 rt -k ~/.ssh/authorized_keys   # require a listed key as well as the password
 rt -n               # no relay or tunnel, 127.0.0.1 only
+rt -c               # send a cleanup script to the client on disconnect
+rt -w ~/logs        # also append the log to ~/logs/rt.log
 ```
 
 `rt` asks for a password (12+ characters), checks each route end to end, then prints how to join:
