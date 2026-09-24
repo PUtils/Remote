@@ -1,0 +1,66 @@
+#!/bin/sh
+# rtc - host Claude Code on this Mac and make it usable from any machine that
+# joins over rt. The agent runs here (the host), but does its work back on the
+# machine you connect from, through rt's `peer` command.
+#
+# It prepares a workspace with a CLAUDE.md that tells the agent where to work
+# and a settings file that pre-allows `peer`, then starts `rt -b`. Connect from
+# the other machine with the bidirectional join command rt prints, then run
+# `claude` in the session.
+#
+# Usage: rtc [extra rt options]     e.g. rtc -h -p -l
+set -eu
+
+WS="${RTC_WORKSPACE:-$HOME/.local/state/rt/agent}"
+
+command -v rt >/dev/null 2>&1 ||
+    { echo "rtc: rt is not installed (run 'make install' in the rt repo)" >&2; exit 1; }
+command -v claude >/dev/null 2>&1 ||
+    echo "rtc: warning: claude is not installed; brew install --cask claude-code" >&2
+
+mkdir -p "$WS/.claude"
+
+cat > "$WS/CLAUDE.md" <<'EOF'
+# You are a remote agent hosted on a Mac, reached over rt
+
+You run on a host Mac through `rt`. The person you are helping is on a DIFFERENT
+machine - their own computer, which they connected FROM. Your job is to do the
+work on THEIR machine, not on this host Mac.
+
+## Where to do the work
+
+- Their machine is reachable only through `peer`, which runs one command on it:
+  `peer <cmd>`. Examples: `peer uname -a`, `peer 'ls -la ~'`, `peer pwd`.
+- `RT_PEER_PORT` and `RT_PEER_USER` are already set and `peer` is passwordless.
+  Run `peer hostname` once to see which machine you are acting on.
+- If `peer` prints "not bidirectional", they joined without `ssh -R`; ask them
+  to reconnect with the bidirectional join command rt printed.
+
+## Rules
+
+- Do the user's real work on THEIR machine with `peer`. Read files with
+  `peer 'cat path'`, list with `peer 'ls ...'`, run their tools with `peer ...`.
+- To create or change a file on their machine, write it through `peer`, e.g.
+  `peer "cat > ~/notes.txt" <<'DONE'` ... `DONE`, or
+  `peer "printf '%s\n' '...' > ~/notes.txt"`.
+- Do NOT use your Write/Edit tools or plain shell for the user's files - those
+  only touch this host Mac, which is not what they want. This Mac is only for
+  scratch space you explicitly need.
+- When unsure where something will land, check with `peer pwd` first.
+EOF
+
+cat > "$WS/.claude/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(peer:*)"]
+  }
+}
+EOF
+
+echo "rtc: workspace ready at $WS"
+echo "rtc: CLAUDE.md + peer permission installed"
+echo "rtc: starting 'rt -b $*'; from the other machine, join with the -b command below,"
+echo "rtc: then run 'claude' in the session."
+echo
+cd "$WS"
+exec rt -b "$@"

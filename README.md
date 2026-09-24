@@ -47,6 +47,23 @@ ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" HOST   # if port 22 i
 
 The relay name is 8 random characters without look-alikes (no 0/o, 1/l/i), created once and kept, so the first command never changes. "administratively prohibited" from ssh means the name was mistyped or `rt` isn't running. `rt` also prints an `~/.ssh/config` entry with connection sharing, so agents can reuse a session you logged into once. The phone panel shows both commands.
 
+## Host Claude Code for another machine (`rtc`)
+
+`rtc` is a small launcher that hosts Claude Code on this Mac and makes it usable from any machine that joins over rt — the agent runs here, but does its work back on the machine you connect from, through `peer`.
+
+```sh
+rtc                 # or: rtc -h -p   (extra args pass through to rt -b)
+```
+
+It writes a workspace at `~/.local/state/rt/agent` with a `CLAUDE.md` that tells the agent to work on the client via `peer`, and a `.claude/settings.json` that pre-allows `Bash(peer:*)` so it doesn't hit the permission gate. Then it starts `rt -b` from that workspace. From the other machine (needs only `ssh`):
+
+```sh
+ssh -R 127.0.0.1:0:127.0.0.1:22 -J rt-XXXXXXXX@ssh-j.com mac   # the -b join command
+claude                                                          # in the session
+```
+
+Claude Code runs on the Mac, rendered in your terminal, and edits/executes on your machine via `peer`. Set `RT_PEER_USER` if your login there differs; a key the client trusts makes it passwordless.
+
 ## Design
 
 - **Processes.** One supervisor holds the password hash, the hibernation state and the panel. Each SSH connection is a freshly exec'd `rt --conn` process that asks the supervisor to check the password. It never holds the hash.

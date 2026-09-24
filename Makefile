@@ -29,12 +29,14 @@ bin build:
 install: bin/rt
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/man/man1
 	install -m 755 bin/rt $(DESTDIR)$(PREFIX)/bin/rt
+	install -m 755 rtc $(DESTDIR)$(PREFIX)/bin/rtc
 	install -m 644 man/rt.1 $(DESTDIR)$(PREFIX)/share/man/man1/rt.1
 	ln -sf rt $(DESTDIR)$(PREFIX)/bin/remote
 	printf '.so man1/rt.1\n' > $(DESTDIR)$(PREFIX)/share/man/man1/remote.1
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/rt $(DESTDIR)$(PREFIX)/bin/remote \
+	      $(DESTDIR)$(PREFIX)/bin/rtc \
 	      $(DESTDIR)$(PREFIX)/share/man/man1/rt.1 $(DESTDIR)$(PREFIX)/share/man/man1/remote.1
 
 clean:
