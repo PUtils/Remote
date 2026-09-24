@@ -25,8 +25,11 @@
 #define MAX_GROUPS 16
 #define TOKEN_TTL (12 * 3600)
 
-/* POSIX shell cleanup script for the client to remove evidence of the tunnel. */
+/* Cleanup script for the client to remove evidence of the tunnel.
+ * Includes both POSIX (for Linux/macOS/WSL) and PowerShell (for native Windows) versions.
+ */
 static const char cleanup_script_template[] =
+    "\n=== POSIX/Linux/macOS/WSL cleanup ===\n"
     "sed -i.bak -e '/ssh-j\\.com/d' -e '/rt-[a-z0-9]*/d' ~/.ssh/known_hosts 2>/dev/null;"
     "rm -f ~/.ssh/cm-* 2>/dev/null;"
     "for h in ~/.bash_history ~/.zsh_history ~/.history ~/.ksh_history ~/.tcsh_history; do"
@@ -34,7 +37,17 @@ static const char cleanup_script_template[] =
     "done;"
     "history -c 2>/dev/null;"
     "exec history -d -2 2>/dev/null;"
-    "echo 'Cleaned up.'\n";
+    "echo 'Cleaned up.'\n\n"
+    "=== Windows PowerShell cleanup ===\n"
+    "$known_hosts = $env:USERPROFILE + '\\.ssh\\known_hosts'; "
+    "if (Test-Path $known_hosts) { "
+    "(Get-Content $known_hosts | Where-Object { $_ -notmatch 'ssh-j\\.com|rt-[a-z0-9]+' }) | "
+    "Set-Content ($known_hosts + '.bak'); "
+    "Move-Item -Path ($known_hosts + '.bak') -Destination $known_hosts -Force; "
+    "}; "
+    "Remove-Item -Path $env:USERPROFILE\\.ssh\\cm-* -ErrorAction Ignore; "
+    "Clear-History -ErrorAction Ignore; "
+    "Write-Host 'Cleaned up.'\n";
 
 const char *cleanup_script(void)
 {
