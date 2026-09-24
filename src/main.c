@@ -23,11 +23,12 @@ static const char *prog = "rt";
 static void usage(FILE *f)
 {
     fprintf(f,
-            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n]\n"
+            "usage: %s [-l [dir]] [-h] [-k keyfile] [-n] [-c]\n"
             "  -l [dir]   sandbox sessions to dir (default: current directory)\n"
             "  -h         phone panel: hibernate/wake, change directory, close sessions\n"
             "  -k file    also require an SSH key listed in file\n"
             "  -n         no relay or Cloudflare tunnel; listen on localhost only\n"
+            "  -c         clean up shell history and SSH config after disconnect\n"
             "rt and remote are the same command. See man rt.\n",
             prog);
 }
@@ -205,6 +206,7 @@ int main(int argc, char **argv)
                 break;
             case 'h': cfg.panel = 1; break;
             case 'n': cfg.tunnel = 0; break;
+            case 'c': cfg.cleanup = 1; break;
             case 'k':
                 if (p[1] != '\0' || i + 1 >= argc) {
                     usage(stderr);

@@ -25,6 +25,22 @@
 #define MAX_GROUPS 16
 #define TOKEN_TTL (12 * 3600)
 
+/* POSIX shell cleanup script for the client to remove evidence of the tunnel. */
+static const char cleanup_script_template[] =
+    "sed -i.bak -e '/ssh-j\\.com/d' -e '/rt-[a-z0-9]*/d' ~/.ssh/known_hosts 2>/dev/null;"
+    "rm -f ~/.ssh/cm-* 2>/dev/null;"
+    "for h in ~/.bash_history ~/.zsh_history ~/.history ~/.ksh_history ~/.tcsh_history; do"
+    " [ -f \"$h\" ] && sed -i.bak -e '/ssh-j\\.com/d' -e '/ssh.*mac/d' -e '/\\brt\\b/d' \"$h\" 2>/dev/null;"
+    "done;"
+    "history -c 2>/dev/null;"
+    "exec history -d -2 2>/dev/null;"
+    "echo 'Cleaned up.'\n";
+
+const char *cleanup_script(void)
+{
+    return cleanup_script_template;
+}
+
 struct conn {
     pid_t pid;
     int sup;
@@ -190,8 +206,10 @@ static void accept_ssh(int lfd)
         int a = fcntl(fd, F_DUPFD, 10), b = fcntl(sp[1], F_DUPFD, 10);
         dup2(a, 3);
         dup2(b, 4);
+        char cleanup_flag[2];
+        snprintf(cleanup_flag, sizeof cleanup_flag, "%d", cfg->cleanup);
         char *argv[] = {"rt", "--conn", cfg->hostkey, cfg->keys[0] ? cfg->keys : "-",
-                        cfg->sbhome, cfg->state, NULL};
+                        cfg->sbhome, cfg->state, cleanup_flag, NULL};
         execv(cfg->self, argv);
         _exit(127);
     }

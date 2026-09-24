@@ -15,6 +15,7 @@ struct config {
     int panel;
     int tunnel;
     int cloudflared;
+    int cleanup;
     char relay[32];
     char relay_kh[PATH_MAX];
     char fingerprint[128];
@@ -51,6 +52,8 @@ int sandbox_profile(char *out, size_t cap, int ntools);
 
 int supervise(struct config *cfg, struct pwhash *pw, int ssh_fd, int ssh_port,
               int http_fd, int http_port);
+
+const char *cleanup_script(void);
 
 void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

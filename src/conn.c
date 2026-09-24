@@ -38,6 +38,7 @@ struct chan {
     int in_fd, out_fd, err_fd;
     int out_eof, err_eof;
     int exited, status, finished, client_closed;
+    int cleanup;
 };
 
 static struct chan chans[MAX_CHANS];
@@ -47,6 +48,7 @@ static ssh_key keys[MAX_KEYS];
 static int nkeys, key_ok, authed, drop, pw_fails;
 static int chld_pipe[2] = {-1, -1};
 static volatile sig_atomic_t got_term;
+static int cleanup_flag;
 
 static int load_keys(const char *path, ssh_key *out, int max)
 {
@@ -197,6 +199,10 @@ static void on_close(ssh_session s, ssh_channel ch, void *ud)
     struct chan *c = mine(ch, ud);
     if (!c)
         return;
+    if (c->cleanup) {
+        const char *script = cleanup_script();
+        ssh_channel_write(ch, (const unsigned char *)script, strlen(script));
+    }
     c->client_closed = 1;
     if (c->pid > 0 && !c->exited)
         killpg(c->pid, SIGHUP);
@@ -352,6 +358,7 @@ static ssh_channel open_session(ssh_session s, void *ud)
         c->used = 1;
         c->master = c->slave = c->in_fd = c->out_fd = c->err_fd = -1;
         c->pid = -1;
+        c->cleanup = cleanup_flag;
         c->cb.userdata = c;
         c->cb.channel_data_function = on_data;
         c->cb.channel_eof_function = on_eof;
@@ -505,6 +512,7 @@ void conn_main(char **argv)
     const char *hostkey = argv[2], *keyfile = argv[3];
     spawnctx.sbhome = argv[4];
     spawnctx.statedir = argv[5];
+    cleanup_flag = argv[6] ? atoi(argv[6]) : 0;
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
