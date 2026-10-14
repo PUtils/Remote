@@ -1,34 +1,52 @@
 #!/bin/sh
-# rtc - host Claude Code on this Mac and make it usable from any machine that
-# joins over rt. The agent runs here (the host), but does its work back on the
-# machine you connect from, through rt's `peer` command.
+# rtc - host a coding agent on this Mac and make it usable from any machine
+# that joins over rt. The agent runs here (the host), but does its work back on
+# the machine you connect from, through rt's `peer` command.
 #
-# It prepares a workspace with a CLAUDE.md that tells the agent where to work
-# and a settings file that pre-allows `peer`, then starts `rt -b`. Connect from
-# the other machine with the bidirectional join command rt prints, then run
-# `claude` in the session.
+# It prepares a workspace with an AGENTS.md (and a CLAUDE.md alias, for Claude
+# Code) that tells the agent where to work, pre-allows `peer` for Claude Code,
+# then starts `rt -b`.
 #
-# Usage: rtc [-a] [extra rt options]     e.g. rtc -a -h -p
-#   -a, --auto   auto-start claude on connect (no need to type it in the session)
-#                the command is $RTC_CLAUDE_CMD, default "claude"
+# Usage: rtc [-a] [-A cmd] [extra rt options]
+#   -a, --auto    auto-start the agent on connect (no need to type it)
+#   -A, --agent cmd   agent command (default: $RTC_AGENT, else "claude")
+#   RTC_WORKSPACE     workspace path (default: ~/.local/state/rt/agent)
+#
+# Examples:
+#   rtc                           # connect, then run the agent yourself
+#   rtc -a                        # auto-start claude (default) on connect
+#   rtc -a -A codex               # auto-start codex instead
+#   RTC_AGENT=codex rtc -a -h -p  # same, args after flags pass through to rt
 set -eu
 
 WS="${RTC_WORKSPACE:-$HOME/.local/state/rt/agent}"
-
+AGENT="${RTC_AGENT:-claude}"
 AUTO=0
-if [ "${1:-}" = "-a" ] || [ "${1:-}" = "--auto" ]; then
-    AUTO=1
-    shift
-fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -a|--auto) AUTO=1; shift ;;
+        -A|--agent)
+            [ $# -ge 2 ] || { echo "rtc: -A needs an argument" >&2; exit 2; }
+            AGENT="$2"; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
 
 command -v rt >/dev/null 2>&1 ||
     { echo "rtc: rt is not installed (run 'make install' in the rt repo)" >&2; exit 1; }
-command -v claude >/dev/null 2>&1 ||
-    echo "rtc: warning: claude is not installed; brew install --cask claude-code" >&2
+
+if [ "$AUTO" = 1 ]; then
+    # Check the first token of the agent command.
+    agent_bin=$(printf '%s\n' "$AGENT" | awk '{print $1}')
+    command -v "$agent_bin" >/dev/null 2>&1 ||
+        echo "rtc: warning: agent command '$agent_bin' is not on PATH" >&2
+fi
 
 mkdir -p "$WS/.claude"
 
-cat > "$WS/CLAUDE.md" <<'EOF'
+cat > "$WS/AGENTS.md" <<'EOF'
 # You are a remote agent hosted on a Mac, reached over rt
 
 You run on a host Mac through `rt`. The person you are helping is on a DIFFERENT
@@ -57,6 +75,11 @@ work on THEIR machine, not on this host Mac.
 - When unsure where something will land, check with `peer pwd` first.
 EOF
 
+# Claude Code reads CLAUDE.md; other agents read AGENTS.md. Point them at the
+# same file so edits stay in sync.
+ln -sf AGENTS.md "$WS/CLAUDE.md"
+
+# Pre-clear Claude Code's permission gate for `peer`. Harmless for other agents.
 cat > "$WS/.claude/settings.json" <<'EOF'
 {
   "permissions": {
@@ -66,16 +89,15 @@ cat > "$WS/.claude/settings.json" <<'EOF'
 EOF
 
 echo "rtc: workspace ready at $WS"
-echo "rtc: CLAUDE.md + peer permission installed"
+echo "rtc: AGENTS.md written (CLAUDE.md -> AGENTS.md); peer pre-allowed for claude"
 cd "$WS"
 if [ "$AUTO" = 1 ]; then
-    CMD="${RTC_CLAUDE_CMD:-claude}"
-    echo "rtc: auto-start on; connecting drops straight into '$CMD'"
+    echo "rtc: auto-start on; connecting drops straight into '$AGENT'"
     echo "rtc: from the other machine, join with the -b command below."
     echo
-    exec rt -b -C "$CMD" "$@"
+    exec rt -b -C "$AGENT" "$@"
 fi
 echo "rtc: starting 'rt -b $*'; from the other machine, join with the -b command below,"
-echo "rtc: then run 'claude' in the session."
+echo "rtc: then run '$AGENT' (or any agent you prefer) in the session."
 echo
 exec rt -b "$@"
