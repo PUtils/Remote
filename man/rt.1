@@ -159,9 +159,6 @@ connection drops straight into
 Single commands
 .Pq Li ssh host 'cmd'
 are unaffected.
-This is how
-.Xr rtc 1
-starts Claude Code on connect.
 .El
 .Pp
 Without
@@ -216,18 +213,11 @@ prints an
 .Pa ~/.ssh/config
 entry with connection sharing for the relay route.
 .Pp
-To give Claude Code a token inside a session, send it from the client:
-.Bd -literal -offset indent
-ssh -o SendEnv=CLAUDE_CODE_OAUTH_TOKEN ...
-.Ed
-.Pp
 Only
 .Ev LANG ,
-.Ev LC_* ,
-.Ev COLORTERM ,
-.Ev CLAUDE_CODE_OAUTH_TOKEN
+.Ev LC_*
 and
-.Ev ANTHROPIC_API_KEY
+.Ev COLORTERM
 are accepted from the client.
 .Sh SECURITY
 Each connection runs in its own process, started fresh with

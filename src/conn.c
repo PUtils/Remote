@@ -259,8 +259,7 @@ static int on_winch(ssh_session s, ssh_channel ch, int w, int h, int pw, int ph,
 
 static int env_allowed(const char *name)
 {
-    static const char *const ok[] = {"LANG", "COLORTERM", "CLAUDE_CODE_OAUTH_TOKEN",
-                                     "ANTHROPIC_API_KEY", NULL};
+    static const char *const ok[] = {"LANG", "COLORTERM", NULL};
     if (strncmp(name, "LC_", 3) == 0)
         return 1;
     for (int i = 0; ok[i]; i++)
